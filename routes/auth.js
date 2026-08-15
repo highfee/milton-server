@@ -742,7 +742,427 @@ router.post("/register-admin", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/auth/reset-password — Reset password with bcrypt hashing
+// POST /api/auth/change-password — Authenticated password change for all roles
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/change-password", authenticate, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!new_password || new_password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "New password must be at least 6 characters long." });
+    }
+
+    const userId = req.user.id;
+    const userEmail = req.user.email ? req.user.email.toLowerCase() : null;
+    const userRole = req.user.role;
+    const profileType = req.user.profile_type;
+    const profileId = req.user.profile_id;
+    const username = req.user.username;
+
+    // Find User table record
+    const userRecord = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: userId },
+          ...(userEmail ? [{ email: userEmail }] : []),
+          ...(username ? [{ username: username }] : []),
+        ],
+      },
+    });
+
+    if (current_password && userRecord && userRecord.password) {
+      const isBcrypt = userRecord.password.startsWith("$2");
+      const valid = isBcrypt
+        ? await bcrypt.compare(current_password, userRecord.password)
+        : current_password === userRecord.password;
+      if (!valid) {
+        return res.status(400).json({ error: "Current password is incorrect." });
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password, 12);
+
+    // 1. Update User table
+    if (userRecord) {
+      await prisma.user.update({
+        where: { id: userRecord.id },
+        data: { password: hashedPassword },
+      });
+    }
+
+    // 2. Update role-specific entity table
+    if (profileType === "AdminUser" || userRole === "admin") {
+      const admin = await prisma.adminUser.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(userEmail ? [{ email: userEmail }] : []),
+          ],
+        },
+      });
+      if (admin) {
+        await prisma.adminUser.update({
+          where: { id: admin.id },
+          data: { password: hashedPassword },
+        });
+      }
+    } else if (
+      profileType === "Teacher" ||
+      userRole === "teacher" ||
+      userRole === "head_teacher" ||
+      userRole === "principal"
+    ) {
+      const teacher = await prisma.teacher.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(userEmail ? [{ email: userEmail }] : []),
+            ...(username ? [{ staff_id: username }] : []),
+          ],
+        },
+      });
+      if (teacher) {
+        await prisma.teacher.update({
+          where: { id: teacher.id },
+          data: { custom_password: hashedPassword },
+        });
+      }
+    } else if (profileType === "Student" || userRole === "student") {
+      const student = await prisma.student.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(username ? [{ admission_number: username }] : []),
+          ],
+        },
+      });
+      if (student) {
+        await prisma.student.update({
+          where: { id: student.id },
+          data: { custom_password: hashedPassword },
+        });
+      }
+    } else if (profileType === "Parent" || userRole === "parent") {
+      const parent = await prisma.parent.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(userEmail ? [{ email: userEmail }] : []),
+            ...(username ? [{ parent_id: username }] : []),
+          ],
+        },
+      });
+      if (parent) {
+        await prisma.parent.update({
+          where: { id: parent.id },
+          data: { custom_password: hashedPassword },
+        });
+      }
+    } else if (
+      profileType === "NonAcademicStaff" ||
+      userRole === "accountant"
+    ) {
+      const staff = await prisma.nonAcademicStaff.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(userEmail ? [{ email: userEmail }] : []),
+            ...(username ? [{ staff_id: username }] : []),
+          ],
+        },
+      });
+      if (staff) {
+        await prisma.nonAcademicStaff.update({
+          where: { id: staff.id },
+          data: { custom_password: hashedPassword },
+        });
+      }
+    }
+
+    return res.json({ message: "Password updated successfully." });
+  } catch (err) {
+    console.error("[auth/change-password]", err);
+    return res
+      .status(500)
+      .json({ error: "Failed to change password. Please try again." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/forgot-password-lookup — Look up account for password reset
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/forgot-password-lookup", async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    if (!identifier || !identifier.trim()) {
+      return res.status(400).json({ error: "Identifier is required." });
+    }
+
+    const key = identifier.trim();
+    const emailKey = key.toLowerCase();
+
+    // 1. Check AdminUser
+    const admin = await prisma.adminUser.findUnique({
+      where: { email: emailKey },
+    });
+    if (admin) {
+      return res.json({
+        found: true,
+        entity_type: "AdminUser",
+        record_id: admin.id,
+        identifier_label: "Admin Email",
+        identifier_value: admin.email,
+        verification_type: "email",
+        masked_hint: admin.email.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      });
+    }
+
+    // 2. Check Teacher
+    const teacher = await prisma.teacher.findFirst({
+      where: {
+        OR: [{ staff_id: key }, { email: emailKey }],
+      },
+    });
+    if (teacher) {
+      const phone = teacher.phone || "";
+      return res.json({
+        found: true,
+        entity_type: "Teacher",
+        record_id: teacher.id,
+        identifier_label: "Staff ID or Email",
+        identifier_value: teacher.staff_id || teacher.email,
+        verification_type: phone ? "phone" : "email",
+        masked_hint: phone
+          ? phone.slice(0, 3) + "****" + phone.slice(-3)
+          : teacher.email.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      });
+    }
+
+    // 3. Check Student
+    const student = await prisma.student.findFirst({
+      where: {
+        OR: [{ admission_number: key }],
+      },
+    });
+    if (student) {
+      const parentPhone = student.parent_phone || "";
+      return res.json({
+        found: true,
+        entity_type: "Student",
+        record_id: student.id,
+        identifier_label: "Admission Number",
+        identifier_value: student.admission_number,
+        verification_type: parentPhone ? "phone" : "none",
+        masked_hint: parentPhone
+          ? parentPhone.slice(0, 3) + "****" + parentPhone.slice(-3)
+          : "Admission Number Verified",
+      });
+    }
+
+    // 4. Check Parent
+    const parent = await prisma.parent.findFirst({
+      where: {
+        OR: [{ parent_id: key }, { email: emailKey }, { phone: key }],
+      },
+    });
+    if (parent) {
+      const phone = parent.phone || "";
+      return res.json({
+        found: true,
+        entity_type: "Parent",
+        record_id: parent.id,
+        identifier_label: "Parent ID / Phone",
+        identifier_value: parent.parent_id || parent.phone,
+        verification_type: phone ? "phone" : "email",
+        masked_hint: phone
+          ? phone.slice(0, 3) + "****" + phone.slice(-3)
+          : (parent.email || "").replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      });
+    }
+
+    // 5. Check NonAcademicStaff
+    const staff = await prisma.nonAcademicStaff.findFirst({
+      where: {
+        OR: [{ staff_id: key }, { email: emailKey }],
+      },
+    });
+    if (staff) {
+      const phone = staff.phone || "";
+      return res.json({
+        found: true,
+        entity_type: "NonAcademicStaff",
+        record_id: staff.id,
+        identifier_label: "Staff ID",
+        identifier_value: staff.staff_id || staff.email,
+        verification_type: phone ? "phone" : "email",
+        masked_hint: phone
+          ? phone.slice(0, 3) + "****" + phone.slice(-3)
+          : (staff.email || "").replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      });
+    }
+
+    return res.status(404).json({
+      error: "No account found matching this identifier. Please verify and try again.",
+    });
+  } catch (err) {
+    console.error("[auth/forgot-password-lookup]", err);
+    return res
+      .status(500)
+      .json({ error: "Failed to look up account. Please try again." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/forgot-password-reset — Verify and reset password
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/forgot-password-reset", async (req, res) => {
+  try {
+    const { entity_type, record_id, verifier, new_password } = req.body;
+
+    if (!entity_type || !record_id || !new_password) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    if (new_password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters long." });
+    }
+
+    const normalizePhone = (p) => (p || "").replace(/[\s+\-()]/g, "");
+
+    // Verify identity depending on entity type
+    if (entity_type === "AdminUser") {
+      const admin = await prisma.adminUser.findUnique({
+        where: { id: record_id },
+      });
+      if (!admin) return res.status(404).json({ error: "Admin not found." });
+      if (verifier && verifier.trim().toLowerCase() !== admin.email.toLowerCase()) {
+        return res.status(400).json({ error: "Verification email does not match." });
+      }
+    } else if (entity_type === "Teacher") {
+      const teacher = await prisma.teacher.findUnique({
+        where: { id: record_id },
+      });
+      if (!teacher) return res.status(404).json({ error: "Teacher record not found." });
+      if (
+        verifier &&
+        normalizePhone(verifier) !== normalizePhone(teacher.phone) &&
+        verifier.trim().toLowerCase() !== (teacher.email || "").toLowerCase()
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Phone number or email does not match record on file." });
+      }
+    } else if (entity_type === "Student") {
+      const student = await prisma.student.findUnique({
+        where: { id: record_id },
+      });
+      if (!student) return res.status(404).json({ error: "Student record not found." });
+      if (
+        verifier &&
+        student.parent_phone &&
+        normalizePhone(verifier) !== normalizePhone(student.parent_phone) &&
+        verifier.trim().toLowerCase() !== (student.admission_number || "").toLowerCase()
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Parent phone number does not match student record." });
+      }
+    } else if (entity_type === "Parent") {
+      const parent = await prisma.parent.findUnique({
+        where: { id: record_id },
+      });
+      if (!parent) return res.status(404).json({ error: "Parent record not found." });
+      if (
+        verifier &&
+        normalizePhone(verifier) !== normalizePhone(parent.phone) &&
+        verifier.trim().toLowerCase() !== (parent.email || "").toLowerCase()
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Phone number does not match parent record." });
+      }
+    } else if (entity_type === "NonAcademicStaff") {
+      const staff = await prisma.nonAcademicStaff.findUnique({
+        where: { id: record_id },
+      });
+      if (!staff) return res.status(404).json({ error: "Staff record not found." });
+      if (
+        verifier &&
+        normalizePhone(verifier) !== normalizePhone(staff.phone) &&
+        verifier.trim().toLowerCase() !== (staff.email || "").toLowerCase()
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Phone number does not match staff record." });
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password, 12);
+
+    switch (entity_type) {
+      case "Teacher":
+        await prisma.teacher.update({
+          where: { id: record_id },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "Student":
+        await prisma.student.update({
+          where: { id: record_id },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "Parent":
+        await prisma.parent.update({
+          where: { id: record_id },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "NonAcademicStaff":
+        await prisma.nonAcademicStaff.update({
+          where: { id: record_id },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "AdminUser":
+        await prisma.adminUser.update({
+          where: { id: record_id },
+          data: { password: hashedPassword },
+        });
+        break;
+    }
+
+    // Sync generic User table
+    const genericUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { profile_type: entity_type, profile_id: record_id },
+          { id: record_id },
+        ],
+      },
+    });
+
+    if (genericUser) {
+      await prisma.user.update({
+        where: { id: genericUser.id },
+        data: { password: hashedPassword },
+      });
+    }
+
+    return res.json({ message: "Password reset successfully. You can now log in." });
+  } catch (err) {
+    console.error("[auth/forgot-password-reset]", err);
+    return res
+      .status(500)
+      .json({ error: "Failed to reset password. Please try again." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/reset-password — Legacy Reset password with bcrypt hashing
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/reset-password", async (req, res) => {
   try {
@@ -759,35 +1179,34 @@ router.post("/reset-password", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(new_password, 12);
-    let updatedRecord = null;
 
     switch (entity_type) {
       case "Teacher":
-        updatedRecord = await prisma.teacher.update({
+        await prisma.teacher.update({
           where: { id: record_id },
           data: { custom_password: hashedPassword },
         });
         break;
       case "Student":
-        updatedRecord = await prisma.student.update({
+        await prisma.student.update({
           where: { id: record_id },
           data: { custom_password: hashedPassword },
         });
         break;
       case "Parent":
-        updatedRecord = await prisma.parent.update({
+        await prisma.parent.update({
           where: { id: record_id },
           data: { custom_password: hashedPassword },
         });
         break;
       case "NonAcademicStaff":
-        updatedRecord = await prisma.nonAcademicStaff.update({
+        await prisma.nonAcademicStaff.update({
           where: { id: record_id },
           data: { custom_password: hashedPassword },
         });
         break;
       case "AdminUser":
-        updatedRecord = await prisma.adminUser.update({
+        await prisma.adminUser.update({
           where: { id: record_id },
           data: { password: hashedPassword },
         });

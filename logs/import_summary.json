@@ -1,0 +1,170 @@
+{
+  "SchoolSettings_export.csv": {
+    "status": "Completed",
+    "total": 1,
+    "processed": 0,
+    "errors": 1
+  },
+  "StaffRole_export.csv": {
+    "status": "Completed",
+    "total": 9,
+    "processed": 9,
+    "errors": 0
+  },
+  "Parent_export.csv": {
+    "status": "Completed",
+    "total": 153,
+    "processed": 153,
+    "errors": 0
+  },
+  "Teacher_export.csv": {
+    "status": "Completed",
+    "total": 25,
+    "processed": 25,
+    "errors": 0
+  },
+  "Student_export.csv": {
+    "status": "Completed",
+    "total": 140,
+    "processed": 140,
+    "errors": 0
+  },
+  "NonAcademicStaff_export.csv": {
+    "status": "Completed",
+    "total": 6,
+    "processed": 0,
+    "errors": 6
+  },
+  "Subject_export.csv": {
+    "status": "Completed",
+    "total": 64,
+    "processed": 64,
+    "errors": 0
+  },
+  "ParentStudent_export.csv": {
+    "status": "Skipped (empty file)",
+    "total": 0,
+    "processed": 0,
+    "errors": 0
+  },
+  "Result_export.csv": {
+    "status": "Completed",
+    "total": 3240,
+    "processed": 962,
+    "errors": 2278
+  },
+  "ReportCard_export.csv": {
+    "status": "Completed",
+    "total": 23,
+    "processed": 23,
+    "errors": 0
+  },
+  "ResultToken_export.csv": {
+    "status": "Completed",
+    "total": 121,
+    "processed": 121,
+    "errors": 0
+  },
+  "Attendance_export.csv": {
+    "status": "Completed",
+    "total": 1825,
+    "processed": 0,
+    "errors": 1825
+  },
+  "Assignment_export.csv": {
+    "status": "Completed",
+    "total": 1,
+    "processed": 0,
+    "errors": 1
+  },
+  "AssignmentSubmission_export.csv": {
+    "status": "Completed",
+    "total": 3,
+    "processed": 0,
+    "errors": 3
+  },
+  "CBTExam_export.csv": {
+    "status": "Completed",
+    "total": 2,
+    "processed": 0,
+    "errors": 2
+  },
+  "CBTResult_export.csv": {
+    "status": "Completed",
+    "total": 3,
+    "processed": 0,
+    "errors": 3
+  },
+  "SchoolFeePayment_export.csv": {
+    "status": "Completed",
+    "total": 3,
+    "processed": 0,
+    "errors": 3
+  },
+  "AdmissionApplication_export.csv": {
+    "status": "Completed",
+    "total": 4,
+    "processed": 0,
+    "errors": 4
+  },
+  "ArchivedStudent_export.csv": {
+    "status": "Completed",
+    "total": 21,
+    "processed": 0,
+    "errors": 21
+  },
+  "Timetable_export.csv": {
+    "status": "Skipped (empty file)",
+    "total": 0,
+    "processed": 0,
+    "errors": 0
+  },
+  "LessonNote_export.csv": {
+    "status": "Completed",
+    "total": 2,
+    "processed": 0,
+    "errors": 2
+  },
+  "Newsletter_export.csv": {
+    "status": "Completed",
+    "total": 1,
+    "processed": 0,
+    "errors": 1
+  },
+  "Gallery_export.csv": {
+    "status": "Completed",
+    "total": 8,
+    "processed": 8,
+    "errors": 0
+  },
+  "Calendar_export.csv": {
+    "status": "Completed",
+    "total": 1,
+    "processed": 0,
+    "errors": 1
+  },
+  "Message_export.csv": {
+    "status": "Completed",
+    "total": 4,
+    "processed": 0,
+    "errors": 4
+  },
+  "Award_export.csv": {
+    "status": "Skipped (empty file)",
+    "total": 0,
+    "processed": 0,
+    "errors": 0
+  },
+  "Discipline_export.csv": {
+    "status": "Skipped (empty file)",
+    "total": 0,
+    "processed": 0,
+    "errors": 0
+  },
+  "Rating_export.csv": {
+    "status": "Completed",
+    "total": 4,
+    "processed": 0,
+    "errors": 4
+  }
+}

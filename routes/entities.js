@@ -1,0 +1,394 @@
+import { Router } from "express";
+import prisma from "../config/prisma.js";
+import {
+  authenticate,
+  authenticateOptional,
+  authorize,
+} from "../middleware/auth.js";
+import { getRequiredRoles } from "../utils/roleGuard.js";
+import { toUIEnums, toPrismaEnums } from "../utils/enumMapper.js";
+import { sanitizeAndCoerce } from "../utils/payloadSanitizer.js";
+import { sendEmail } from "../services/email.js";
+
+const router = Router();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Map model name (string) → Prisma delegate
+// ─────────────────────────────────────────────────────────────────────────────
+const MODEL_MAP = {
+  Student: () => prisma.student,
+  Teacher: () => prisma.teacher,
+  Parent: () => prisma.parent,
+  ParentStudent: () => prisma.parentStudent,
+  Subject: () => prisma.subject,
+  StaffRole: () => prisma.staffRole,
+  Result: () => prisma.result,
+  ReportCard: () => prisma.reportCard,
+  ResultToken: () => prisma.resultToken,
+  Attendance: () => prisma.attendance,
+  Assignment: () => prisma.assignment,
+  AssignmentSubmission: () => prisma.assignmentSubmission,
+  CBTExam: () => prisma.cBTExam,
+  CBTResult: () => prisma.cBTResult,
+  CBTExamPassword: () => prisma.cBTExamPassword,
+  CBTMalpractice: () => prisma.cBTMalpractice,
+  SchoolFeePayment: () => prisma.schoolFeePayment,
+  FeePayment: () => prisma.schoolFeePayment,
+  SalaryPayment: () => prisma.salaryPayment,
+  Expense: () => prisma.expense,
+  SchoolSettings: () => prisma.schoolSettings,
+  AdmissionApplication: () => prisma.admissionApplication,
+  ArchivedStudent: () => prisma.archivedStudent,
+  Timetable: () => prisma.timetable,
+  LessonNote: () => prisma.lessonNote,
+  Newsletter: () => prisma.newsletter,
+  Gallery: () => prisma.gallery,
+  Calendar: () => prisma.calendar,
+  Holiday: () => prisma.holiday,
+  Message: () => prisma.message,
+  Award: () => prisma.award,
+  Discipline: () => prisma.discipline,
+  Rating: () => prisma.rating,
+  NonAcademicStaff: () => prisma.nonAcademicStaff,
+  SchoolProject: () => prisma.schoolProject,
+  DirectorNotification: () => prisma.directorNotification,
+  ChatMessage: () => prisma.chatMessage,
+  ChatPresence: () => prisma.chatPresence,
+  Meeting: () => prisma.meeting,
+  AdminUser: () => prisma.adminUser,
+  User: () => prisma.user,
+  PublicMessage: () => prisma.publicMessage,
+  SchoolClass: () => prisma.schoolClass,
+  Class: () => prisma.schoolClass,
+  PTAMeeting: () => prisma.pTAMeeting,
+};
+
+function resolveModel(modelName) {
+  const factory = MODEL_MAP[modelName];
+  if (!factory) return null;
+  return factory();
+}
+
+function buildAuthChain(modelName, operation) {
+  const roles = getRequiredRoles(modelName, operation);
+  if (roles === null) {
+    return [authenticateOptional];
+  }
+  if (roles.length === 0) {
+    return [authenticate];
+  }
+  return [authenticate, authorize(...roles)];
+}
+
+function parseSort(sortStr) {
+  if (!sortStr) return { created_date: "desc" };
+  const desc = sortStr.startsWith("-");
+  const field = desc ? sortStr.slice(1) : sortStr;
+  // Keep field as-is (already in snake_case from client)
+  return { [field]: desc ? "desc" : "asc" };
+}
+
+function buildWhere(query) {
+  const where = {};
+  const skip = ["_sort", "_limit", "_skip"];
+  for (const [key, val] of Object.entries(query)) {
+    if (skip.includes(key)) continue;
+    // Convert camelCase (e.g. staffId) to snake_case (e.g. staff_id) to match Prisma schema
+    const snakeKey = key.replace(/([A-Z])/g, "_$1").toLowerCase();
+    where[snakeKey] = val;
+  }
+  return where;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/entities/:model — list all
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  "/:model",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "list");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      const orderBy = parseSort(req.query._sort);
+      const take = req.query._limit ? parseInt(req.query._limit) : undefined;
+
+      const records = await db.findMany({ orderBy, take });
+      return res.json(toUIEnums(records));
+    } catch (err) {
+      console.error(`[GET /${model}]`, err);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/entities/:model/filter — filter by query params
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  "/:model/filter",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "filter");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      const rawWhere = buildWhere(req.query);
+      const where = toPrismaEnums(rawWhere);
+      const orderBy = parseSort(req.query._sort);
+      const take = req.query._limit ? parseInt(req.query._limit) : undefined;
+
+      const records = await db.findMany({ where, orderBy, take });
+      return res.json(toUIEnums(records));
+    } catch (err) {
+      console.error(`[GET /${model}/filter]`, err);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/entities/:model/:id — get single record
+// ─────────────────────────────────────────────────────────────────────────────
+router.get(
+  "/:model/:id",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "get");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      const record = await db.findUnique({ where: { id: req.params.id } });
+      if (!record) return res.status(404).json({ error: "Record not found." });
+      return res.json(toUIEnums(record));
+    } catch (err) {
+      console.error(`[GET /${model}/:id]`, err);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/entities/:model — create record
+// ─────────────────────────────────────────────────────────────────────────────
+router.post(
+  "/:model",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "create");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      const {
+        id,
+        createdDate,
+        updatedDate,
+        created_date,
+        updated_date,
+        ...rawData
+      } = req.body;
+
+      if (model === "AdmissionApplication" && req.user) {
+        rawData.created_by_id = req.user.id;
+      }
+
+      const prismaData = sanitizeAndCoerce(model, rawData);
+      const record = await db.create({ data: prismaData });
+      return res.status(201).json(toUIEnums(record));
+    } catch (err) {
+      console.error(`[POST /${model}]`, err);
+      return res.status(400).json({ error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /api/entities/:model/:id — update record
+// ─────────────────────────────────────────────────────────────────────────────
+router.patch(
+  "/:model/:id",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "update");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model, id } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      const {
+        id: _id,
+        createdDate,
+        updatedDate,
+        created_date,
+        updated_date,
+        ...rawData
+      } = req.body;
+
+      const prismaData = sanitizeAndCoerce(model, rawData);
+
+      // Workflow: AdmissionApplication → "Offered Admission"
+      if (
+        model === "AdmissionApplication" &&
+        (prismaData.status === "Offered_Admission" ||
+          rawData.status === "Offered Admission")
+      ) {
+        const oldApp = await prisma.admissionApplication.findUnique({
+          where: { id },
+        });
+        if (oldApp && oldApp.status !== "Offered_Admission") {
+          try {
+            await triggerSendAdmissionOfferEmail(id, req);
+          } catch (emailErr) {
+            console.error(
+              "[Workflow] sendAdmissionOfferEmail failed:",
+              emailErr.message,
+            );
+          }
+        }
+      }
+
+      const record = await db.update({ where: { id }, data: prismaData });
+      return res.json(toUIEnums(record));
+    } catch (err) {
+      if (err.code === "P2025") {
+        return res.status(404).json({ error: "Record not found." });
+      }
+      console.error(`[PATCH /${model}/:id]`, err);
+      return res.status(400).json({ error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/entities/:model/:id — delete record
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete(
+  "/:model/:id",
+  (req, res, next) => {
+    const { model } = req.params;
+    const chain = buildAuthChain(model, "delete");
+    let i = 0;
+    const runNext = () => {
+      if (i < chain.length) chain[i++](req, res, runNext);
+      else next();
+    };
+    runNext();
+  },
+  async (req, res) => {
+    const { model, id } = req.params;
+    const db = resolveModel(model);
+    if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
+
+    try {
+      await db.delete({ where: { id } });
+      return res.json({ success: true, id });
+    } catch (err) {
+      if (err.code === "P2025") {
+        return res.status(404).json({ error: "Record not found." });
+      }
+      console.error(`[DELETE /${model}/:id]`, err);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+async function triggerSendAdmissionOfferEmail(applicationId, req) {
+  const app = await prisma.admissionApplication.findUnique({
+    where: { id: applicationId },
+  });
+  if (!app || !app.parent_email) return;
+
+  const applicantName = `${app.first_name} ${app.last_name}`.trim();
+  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  const responseUrl = `${baseUrl}/api/functions/handleAdmissionResponse`;
+  const acceptLink = `${responseUrl}?app=${applicationId}&action=accept`;
+  const rejectLink = `${responseUrl}?app=${applicationId}&action=reject`;
+
+  const tuitionLine = app.tuition_fee
+    ? `Tuition Fee: N${Number(app.tuition_fee).toLocaleString()}\n`
+    : "";
+  const resumeLine = app.resumption_date
+    ? `Resumption Date: ${app.resumption_date}\n`
+    : "";
+
+  const message = `Dear ${app.parent_name},
+
+CONGRATULATIONS!
+
+We are pleased to inform you that ${applicantName} has been offered provisional admission into ${app.section_applying} section, Class: ${app.final_class_admitted || app.class_applying} at Milton College of Arts and Science, Kaduna.
+
+Admission Number: ${app.admission_number_generated || "To be assigned"}
+${tuitionLine}${resumeLine}
+To proceed, please choose one of the options below:
+
+ACCEPT ADMISSION:
+${acceptLink}
+
+REJECT ADMISSION:
+${rejectLink}
+
+If you accept, an acceptance letter (PDF) will be sent to your email immediately. Please print the acceptance letter and bring it to the school.
+
+This offer is valid for 14 days. If you do not respond within this period, the offer may be withdrawn.
+
+Warm regards,
+Admissions Office
+Milton College of Arts and Science, Kaduna`;
+
+  await sendEmail({
+    to: app.parent_email,
+    subject: `Admission Offer — ${applicantName} | Milton College`,
+    text: message,
+  });
+}
+
+export default router;

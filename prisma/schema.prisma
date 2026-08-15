@@ -1,0 +1,1411 @@
+// Milton College Portal — Prisma Schema
+// Aligned with base44 schema (39 entities + User)
+// All new fields are optional — existing data is fully preserved
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Gender {
+  Male
+  Female
+}
+
+enum Section {
+  Nursery
+  Primary
+  Secondary
+}
+
+enum SectionAll {
+  Nursery
+  Primary
+  Secondary
+  All
+}
+
+enum BloodGroup {
+  A_PLUS   @map("A+")
+  A_MINUS  @map("A-")
+  B_PLUS   @map("B+")
+  B_MINUS  @map("B-")
+  AB_PLUS  @map("AB+")
+  AB_MINUS @map("AB-")
+  O_PLUS   @map("O+")
+  O_MINUS  @map("O-")
+}
+
+enum Genotype {
+  AA
+  AS
+  SS
+  AC
+  SC
+}
+
+enum SportHouse {
+  Red_House    @map("Red House")
+  Blue_House   @map("Blue House")
+  Green_House  @map("Green House")
+  Yellow_House @map("Yellow House")
+}
+
+enum StudentStatus {
+  Active
+  Graduated
+  Withdrawn
+  Suspended
+}
+
+enum StaffStatus {
+  Active
+  Inactive
+  On_Leave    @map("On Leave")
+  Terminated
+}
+
+enum Term {
+  First_Term  @map("First Term")
+  Second_Term @map("Second Term")
+  Third_Term  @map("Third Term")
+}
+
+enum TeacherType {
+  Class_Teacher   @map("Class Teacher")
+  Subject_Teacher @map("Subject Teacher")
+  Form_Teacher    @map("Form Teacher")
+  Head_Teacher    @map("Head Teacher")
+  Principal
+}
+
+enum TeacherStatus {
+  Active
+  Inactive
+  On_Leave @map("On Leave")
+}
+
+enum NonAcademicRole {
+  Admin
+  Accountant
+  Driver
+  Typist
+  StoreKeeper
+  SchoolNurse
+  Security
+  Nanny
+  Cleaner
+  Cashier
+}
+
+enum ParentRelationship {
+  Father
+  Mother
+  Guardian
+  Other
+}
+
+enum ResultStatus {
+  Draft
+  Submitted
+  Reviewed
+  Approved
+}
+
+enum PromotionStatus {
+  Promoted
+  Repeated
+  Demoted
+}
+
+enum AdmissionStatus {
+  Pending
+  Under_Review      @map("Under Review")
+  Accepted
+  Rejected
+  Offered_Admission @map("Offered Admission")
+  Admitted
+}
+
+enum PaymentMethod {
+  Cash
+  Bank_Transfer @map("Bank Transfer")
+  Online
+  Cheque
+}
+
+enum PaymentStatus {
+  Paid
+  Partial
+  Pending
+}
+
+enum SalaryPaymentMethod {
+  Bank_Transfer @map("Bank Transfer")
+  Cash
+  Cheque
+}
+
+enum SalaryStatus {
+  Paid
+  Pending
+}
+
+enum ExpenseStatus {
+  Pending_Approval @map("Pending Approval")
+  Approved
+  Rejected
+}
+
+enum AssignmentStatus {
+  Draft
+  Active
+  Closed
+}
+
+enum AssignmentType {
+  Assignment
+  Homework
+}
+
+enum AssignmentSubmissionStatus {
+  Submitted
+  Graded
+  Late
+}
+
+enum CBTStatus {
+  Draft
+  Published
+  Closed
+}
+
+enum CBTResultStatus {
+  Pending
+  Graded
+}
+
+enum ExamType {
+  Termly_Examination @map("Termly Examination")
+  Mock_Examination   @map("Mock Examination")
+  Common_Entrance    @map("Common Entrance")
+  Homework
+  Assignment
+}
+
+enum LessonNoteStatus {
+  Draft
+  Pending_Approval @map("Pending Approval")
+  Approved
+  Rejected
+  Published
+}
+
+enum AttendanceStatus {
+  Present
+  Absent
+  Late
+  Excused
+}
+
+enum NewsletterStatus {
+  Draft
+  Published
+}
+
+enum ReportCardStatus {
+  Generated
+  Published
+}
+
+enum ResultTokenStatus {
+  Active
+  Used
+  Expired
+  Revoked
+}
+
+enum ClassStatus {
+  Active
+  Inactive
+}
+
+enum CalendarStatus {
+  Active
+  Archived
+}
+
+enum TimetableStatus {
+  Active
+  Archived
+}
+
+enum SchoolProjectStatus {
+  Planned
+  Ongoing
+  Completed
+  Suspended
+}
+
+enum ProjectSponsorType {
+  School
+  External
+  Mixed
+}
+
+enum DirectorNotificationType {
+  admission
+  withdrawal
+  expense
+  salary_due
+  project
+}
+
+enum MeetingStatus {
+  Scheduled
+  Live
+  Ended
+}
+
+enum ChatTargetAudience {
+  All
+  Parents
+  Staff
+}
+
+enum ChatMessageType {
+  text
+  voice
+  image
+}
+
+enum GalleryCategory {
+  Activities
+  Library
+  Laboratory
+  Sports
+  Events
+  Facilities
+}
+
+enum GalleryStatus {
+  Published
+  Draft
+}
+
+enum DisciplineIncidentType {
+  Minor
+  Major
+  Serious
+}
+
+enum DisciplineStatus {
+  Pending
+  Resolved
+  Escalated
+}
+
+enum AwardType {
+  Academic_Excellence  @map("Academic Excellence")
+  Best_Behaved         @map("Best Behaved")
+  Most_Improved        @map("Most Improved")
+  Sport_Excellence     @map("Sport Excellence")
+  Leadership
+  Perfect_Attendance   @map("Perfect Attendance")
+  Scholarship
+  Other
+}
+
+enum RatingStatus {
+  Pending
+  Approved
+  Rejected
+}
+
+enum RatingUserType {
+  Parent
+  Public
+  Student
+}
+
+enum StaffRoleType {
+  Admin
+  Teacher
+  Head_Teacher       @map("Head Teacher")
+  Principal
+  Accountant
+  Non_Academic_Staff @map("Non-Academic Staff")
+}
+
+enum StaffRoleStatus {
+  Active
+  Inactive
+}
+
+enum UserRole {
+  admin
+  teacher
+  head_teacher
+  principal
+  student
+  parent
+  accountant
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN USER (platform login)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  password     String
+  first_name   String
+  last_name    String
+  role         UserRole @default(admin)
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("admin_users")
+}
+
+// GENERAL AUTHENTICATED USERS
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  username     String?  @unique
+  password     String?  @db.Text
+  role         UserRole @default(admin)
+  first_name   String?
+  last_name    String?
+  profile_type String?
+  profile_id   String?
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTITIES
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Student {
+  id               String        @id @default(cuid())
+  admission_number String?       @unique
+  first_name       String
+  last_name        String
+  middle_name      String?
+  date_of_birth    String?
+  gender           Gender?
+  passport_photo   String?       @db.Text
+  section          Section
+  current_class    String
+  subjects         Json?
+  state_of_origin  String?
+  local_government String?
+  blood_group      BloodGroup?
+  genotype         Genotype?
+  tribe            String?
+  sport_house      SportHouse?
+  weight           Float?
+  height           Float?
+  parent_id        String?
+  parent_name      String?
+  parent_phone     String?
+  parent_email     String?
+  address          String?       @db.Text
+  admission_date   String?
+  status           StudentStatus @default(Active)
+  current_term     Term?
+  current_session  String?
+  custom_password  String?
+  created_date     DateTime      @default(now()) @map("created_date")
+  updated_date     DateTime      @updatedAt @map("updated_date")
+
+  @@map("students")
+}
+
+model Teacher {
+  id                 String        @id @default(cuid())
+  staff_id           String?       @unique
+  first_name         String
+  last_name          String
+  email              String
+  phone              String?
+  passport_photo     String?       @db.Text
+  section            Section
+  teacher_type       TeacherType
+  assigned_class     String?
+  assigned_subjects  Json?
+  form_teacher_class String?
+  qualification      String?
+  date_employed      String?
+  status             TeacherStatus @default(Active)
+  user_id            String?
+  custom_password    String?
+  // Financial fields (base44)
+  salary             Float?
+  bank_name          String?
+  account_number     String?
+  account_name       String?
+  created_date       DateTime      @default(now()) @map("created_date")
+  updated_date       DateTime      @updatedAt @map("updated_date")
+
+  @@map("teachers")
+}
+
+model NonAcademicStaff {
+  id              String   @id @default(cuid())
+  staff_id        String?  @unique
+  first_name      String
+  last_name       String
+  role            String
+  phone           String?
+  email           String?
+  address         String?  @db.Text
+  date_employed   String?
+  status          String?  @default("Active")
+  passport_photo  String?  @db.Text
+  custom_password String?
+  // Extended base44 fields
+  duties              String?
+  department          String?
+  qualification       String?
+  emergency_contact   String?
+  salary              Float?
+  bank_name           String?
+  account_number      String?
+  account_name        String?
+  created_date        DateTime @default(now()) @map("created_date")
+  updated_date        DateTime @updatedAt @map("updated_date")
+
+  @@map("non_academic_staff")
+}
+
+model Parent {
+  id              String  @id @default(cuid())
+  parent_id       String? @unique
+  first_name      String?
+  last_name       String?
+  full_name       String?
+  email           String?
+  phone           String?
+  address         String? @db.Text
+  occupation      String?
+  relationship    String? @default("Guardian")
+  passport_photo  String? @db.Text
+  default_username String?
+  user_id         String?
+  status          String? @default("Active")
+  custom_password String?
+  created_date    DateTime @default(now()) @map("created_date")
+  updated_date    DateTime @updatedAt @map("updated_date")
+
+  @@map("parents")
+}
+
+model ParentStudent {
+  id             String  @id @default(cuid())
+  parent_email   String
+  parent_id      String?
+  parent_user_id String?
+  parent_name    String?
+  student_id     String
+  student_name   String?
+  relationship   String?
+  created_date   DateTime @default(now()) @map("created_date")
+  updated_date   DateTime @updatedAt @map("updated_date")
+
+  @@map("parent_students")
+}
+
+model Subject {
+  id           String   @id @default(cuid())
+  name         String
+  code         String?
+  section      Section?
+  teacher_id   String?
+  teacher_name String?
+  class        String?
+  classes      Json?
+  description  String?
+  status       String?  @default("Active")
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("subjects")
+}
+
+model StaffRole {
+  id           String          @id @default(cuid())
+  user_id      String?
+  user_email   String
+  user_name    String?
+  role         StaffRoleType
+  section      String?
+  teacher_id   String?
+  status       StaffRoleStatus @default(Active)
+  created_date DateTime        @default(now()) @map("created_date")
+  updated_date DateTime        @updatedAt @map("updated_date")
+
+  @@map("staff_roles")
+}
+
+model SchoolClass {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  section            Section?
+  capacity           Int?     @default(40)
+  class_teacher_id   String?
+  class_teacher_name String?
+  room_number        String?
+  status             String?  @default("Active")
+  created_date       DateTime @default(now()) @map("created_date")
+  updated_date       DateTime @updatedAt @map("updated_date")
+
+  @@map("school_classes")
+}
+
+model Result {
+  id                       String           @id @default(cuid())
+  student_id               String
+  student_name             String?
+  admission_number         String?
+  class                    String
+  section                  Section?
+  term                     Term
+  session                  String
+  subject_id               String
+  subject_name             String?
+  first_ca                 Float?
+  second_ca                Float?
+  third_ca                 Float?
+  exam_score               Float?
+  total                    Float?
+  grade                    String?
+  remark                   String?
+  subject_position         Int?
+  class_average_score      Float?
+  teacher_id               String?
+  teacher_comment          String?          @db.Text
+  form_teacher_comment     String?          @db.Text
+  principal_comment        String?          @db.Text
+  head_teacher_comment     String?          @db.Text
+  class_position           Int?
+  total_in_class           Int?
+  total_score_all_subjects Float?
+  school_fees_arrears      Float?           @default(0)
+  school_fees_current      Float?           @default(0)
+  next_term_begins         String?
+  affective_traits         Json?
+  psychomotor_skills       Json?
+  promotion_status         PromotionStatus?
+  promoted_to_class        String?
+  status                   ResultStatus     @default(Draft)
+  approved_by              String?
+  approved_date            String?
+  created_date             DateTime         @default(now()) @map("created_date")
+  updated_date             DateTime         @updatedAt @map("updated_date")
+
+  @@map("results")
+}
+
+model ReportCard {
+  id                    String            @id @default(cuid())
+  student_id            String
+  student_name          String?
+  admission_number      String?
+  class                 String?
+  section               Section?
+  term                  Term?
+  session               String?
+  // Aggregation fields (base44)
+  subjects_data         Json?
+  total_score           Float?
+  average               Float?
+  overall_grade         String?
+  position              Int?
+  total_students        Int?
+  credits_count         Int?
+  fails_count           Int?
+  a_grade_count         Int?
+  b_grade_count         Int?
+  passes_count          Int?
+  attendance_present    Int?
+  attendance_total      Int?
+  class_teacher_comment String?          @db.Text
+  form_teacher_comment  String?          @db.Text
+  head_teacher_comment  String?          @db.Text
+  principal_comment     String?          @db.Text
+  next_term_begins      String?
+  pdf_url               String?          @db.Text
+  status                String?          @default("Generated")
+  generated_by          String?
+  created_date          DateTime         @default(now()) @map("created_date")
+  updated_date          DateTime         @updatedAt @map("updated_date")
+
+  @@map("report_cards")
+}
+
+model ResultToken {
+  id               String            @id @default(cuid())
+  token            String            @unique
+  student_id       String?
+  student_name     String?
+  admission_number String?
+  class            String?
+  section          Section?
+  term             Term?
+  session          String?
+  generated_by     String?
+  generated_date   String?
+  status           ResultTokenStatus @default(Active)
+  approved_by      String?
+  approved_date    String?
+  // Legacy field
+  is_used          Boolean           @default(false)
+  created_date     DateTime          @default(now()) @map("created_date")
+  updated_date     DateTime          @updatedAt @map("updated_date")
+
+  @@map("result_tokens")
+}
+
+model Attendance {
+  id               String           @id @default(cuid())
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String
+  section          Section?
+  term             Term?
+  session          String?
+  date             String?
+  status           AttendanceStatus @default(Present)
+  remarks          String?
+  marked_by        String?
+  // Legacy field
+  created_by       String?
+  created_date     DateTime         @default(now()) @map("created_date")
+  updated_date     DateTime         @updatedAt @map("updated_date")
+
+  @@map("attendance")
+}
+
+model Holiday {
+  id           String     @id @default(cuid())
+  name         String
+  start_date   String
+  end_date     String
+  term         Term
+  session      String
+  section      String?    @default("All")
+  created_date DateTime   @default(now()) @map("created_date")
+  updated_date DateTime   @updatedAt @map("updated_date")
+
+  @@map("holidays")
+}
+
+model Calendar {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?  @db.Text
+  // Single-event fields (current schema)
+  date         String?
+  end_date     String?
+  type         String?
+  // Base44 fields
+  section      String?  @default("All")
+  activities   Json?
+  attachment_url String? @db.Text
+  status       String?  @default("Active")
+  term         Term?
+  session      String?
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("calendars")
+}
+
+model Timetable {
+  id             String   @id @default(cuid())
+  title          String?
+  class          String
+  section        Section?
+  term           Term?
+  session        String?
+  schedule       Json?
+  attachment_url String?  @db.Text
+  status         String?  @default("Active")
+  created_by     String?
+  created_date   DateTime @default(now()) @map("created_date")
+  updated_date   DateTime @updatedAt @map("updated_date")
+
+  @@map("timetables")
+}
+
+model Assignment {
+  id           String         @id @default(cuid())
+  title        String
+  type         String?        @default("Assignment")
+  description  String?        @db.Text
+  content      String?        @db.Text
+  class        String
+  section      Section?
+  subject_id   String?
+  subject_name String?
+  teacher_id   String?
+  teacher_name String?
+  due_date     String?
+  max_score    Float?         @default(100)
+  total_marks  Float?
+  file_url     String?        @db.Text
+  attachment_url String?      @db.Text
+  status       AssignmentStatus @default(Active)
+  term         Term?
+  session      String?
+  created_date DateTime       @default(now()) @map("created_date")
+  updated_date DateTime       @updatedAt @map("updated_date")
+
+  @@map("assignments")
+}
+
+model AssignmentSubmission {
+  id               String   @id @default(cuid())
+  assignment_id    String
+  assignment_title String?
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String?
+  file_url         String?  @db.Text
+  submission_text  String?  @db.Text
+  // Legacy field
+  text_response    String?  @db.Text
+  score            Float?
+  total_marks      Float?
+  feedback         String?  @db.Text
+  teacher_feedback String?  @db.Text
+  submitted_at     String?
+  submitted_date   String?
+  graded_by        String?
+  graded_date      String?
+  status           String?  @default("Submitted")
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("assignment_submissions")
+}
+
+model LessonNote {
+  id               String           @id @default(cuid())
+  title            String
+  topic            String?
+  content          String?          @db.Text
+  class            String
+  section          Section?
+  subject_id       String?
+  subject_name     String?
+  teacher_id       String?
+  teacher_name     String?
+  week             String?
+  term             Term?
+  session          String?
+  attachment_url   String?          @db.Text
+  status           LessonNoteStatus @default(Draft)
+  // Review workflow fields (base44)
+  reviewer_id      String?
+  reviewer_name    String?
+  reviewer_role    String?
+  review_comment   String?          @db.Text
+  rejection_reasons String?         @db.Text
+  reviewed_date    String?
+  published_date   String?
+  revision_count   Int?             @default(0)
+  created_date     DateTime         @default(now()) @map("created_date")
+  updated_date     DateTime         @updatedAt @map("updated_date")
+
+  @@map("lesson_notes")
+}
+
+model CBTExam {
+  id               String   @id @default(cuid())
+  title            String
+  description      String?  @db.Text
+  exam_type        String?
+  // Multi-class targeting
+  class            String?
+  classes          Json?
+  section          Section?
+  subject_id       String?
+  subject_name     String?
+  questions        Json?
+  // Timing
+  time_limit       Int?
+  duration_minutes Int?
+  start_date       String?
+  end_date         String?
+  // Scoring
+  max_score        Float?
+  pass_mark        Float?
+  total_marks      Float?
+  // Security
+  exam_password    String?
+  instructions     String?  @db.Text
+  status           CBTStatus @default(Draft)
+  created_by       String?
+  term             Term?
+  session          String?
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("cbt_exams")
+}
+
+model CBTResult {
+  id                 String          @id @default(cuid())
+  exam_id            String
+  exam_title         String?
+  exam_type          String?
+  subject_name       String?
+  teacher_email      String?
+  student_id         String
+  student_name       String?
+  admission_number   String?
+  class              String?
+  answers            Json?
+  score              Float?
+  theory_score       Float?          @default(0)
+  total_marks        Float?
+  percentage         Float?
+  grade              String?
+  time_taken_minutes Int?
+  // Legacy fields
+  total_questions    Int?
+  correct_answers    Int?
+  time_taken         Int?
+  completed_at       String?
+  submitted_at       String?
+  theory_graded      Boolean         @default(false)
+  auto_submitted     Boolean         @default(false)
+  status             CBTResultStatus @default(Pending)
+  created_date       DateTime        @default(now()) @map("created_date")
+  updated_date       DateTime        @updatedAt @map("updated_date")
+
+  @@map("cbt_results")
+}
+
+model CBTExamPassword {
+  id               String   @id @default(cuid())
+  exam_id          String
+  exam_title       String?
+  subject_name     String?
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String?
+  password         String
+  used             Boolean  @default(false)
+  generated_by     String?
+  generated_date   String?
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("cbt_exam_passwords")
+}
+
+model CBTMalpractice {
+  id               String   @id @default(cuid())
+  exam_id          String
+  exam_title       String?
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String?
+  violation_count  Int      @default(0)
+  logout_count     Int      @default(0)
+  is_blocked       Boolean  @default(false)
+  block_reason     String?
+  unblocked_by     String?
+  unblock_date     String?
+  new_exam_time    String?
+  warning_message  String?
+  retained_answers String?  @db.Text
+  retained_question Int     @default(0)
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("cbt_malpractices")
+}
+
+model SchoolFeePayment {
+  id               String        @id @default(cuid())
+  receipt_number   String?       @unique
+  student_id       String?
+  student_name     String
+  admission_number String?
+  class            String
+  section          Section?
+  term             Term
+  session          String
+  parent_name      String?
+  parent_phone     String?
+  payment_method   PaymentMethod @default(Cash)
+  items            Json?
+  total_amount     Float
+  amount_paid      Float?
+  balance          Float?        @default(0)
+  previous_balance Float?        @default(0)
+  payment_date     String?
+  recorded_by      String?
+  status           PaymentStatus @default(Paid)
+  notes            String?       @db.Text
+  created_date     DateTime      @default(now()) @map("created_date")
+  updated_date     DateTime      @updatedAt @map("updated_date")
+
+  @@map("school_fee_payments")
+}
+
+model SalaryPayment {
+  id             String              @id @default(cuid())
+  receipt_number String?
+  staff_id       String?
+  staff_name     String
+  staff_type     String?
+  role           String?
+  bank_name      String?
+  account_number String?
+  account_name   String?
+  amount         Float
+  month          String
+  term           Term?
+  session        String?
+  payment_date   String?
+  payment_method SalaryPaymentMethod @default(Bank_Transfer)
+  paid_by        String?
+  notes          String?             @db.Text
+  status         SalaryStatus        @default(Paid)
+  created_date   DateTime            @default(now()) @map("created_date")
+  updated_date   DateTime            @updatedAt @map("updated_date")
+
+  @@map("salary_payments")
+}
+
+model Expense {
+  id             String        @id @default(cuid())
+  expense_name   String
+  reason         String?       @db.Text
+  department     String?
+  collected_by   String?
+  expense_date   String?
+  expense_time   String?
+  term           Term?
+  session        String?
+  items          Json?
+  grand_total    Float
+  receipt_number String?
+  status         ExpenseStatus @default(Pending_Approval)
+  approved_by    String?
+  approved_date  String?
+  recorded_by    String?
+  notes          String?       @db.Text
+  created_date   DateTime      @default(now()) @map("created_date")
+  updated_date   DateTime      @updatedAt @map("updated_date")
+
+  @@map("expenses")
+}
+
+model SchoolSettings {
+  id                String  @id @default(cuid())
+  school_name       String
+  school_logo       String? @db.Text
+  phone             String?
+  email             String?
+  address           String? @db.Text
+  current_session   String?
+  current_term      Term?
+  principal_id      String?
+  principal_name    String?
+  head_teacher_id   String?
+  head_teacher_name String?
+  motto             String?
+  about             String? @db.Text
+  director_email    String?
+  director_password String?
+  created_date      DateTime @default(now()) @map("created_date")
+  updated_date      DateTime @updatedAt @map("updated_date")
+
+  @@map("school_settings")
+}
+
+model AdmissionApplication {
+  id                         String          @id @default(cuid())
+  application_number         String?         @unique
+  first_name                 String
+  last_name                  String
+  middle_name                String?
+  date_of_birth              String
+  gender                     Gender
+  passport_photo             String?         @db.Text
+  section_applying           Section
+  class_applying             String
+  former_school_name         String?
+  former_school_class        String?
+  last_result_upload         String?         @db.Text
+  state_of_origin            String?
+  local_government           String?
+  address                    String?         @db.Text
+  parent_name                String
+  parent_phone               String
+  parent_email               String
+  parent_occupation          String?
+  emergency_contact          String?
+  health_conditions          String?         @db.Text
+  application_date           String?
+  status                     AdmissionStatus @default(Pending)
+  admin_notes                String?         @db.Text
+  email_verified             Boolean         @default(false)
+  email_verification_code    String?
+  test_score                 Float?
+  final_class_admitted       String?
+  admission_number_generated String?
+  admission_letter_sent      Boolean         @default(false)
+  student_record_created     Boolean         @default(false)
+  tuition_fee                Float?
+  resumption_date            String?
+  application_form_pdf_url   String?         @db.Text
+  admission_letter_pdf_url   String?         @db.Text
+  acceptance_letter_pdf_url  String?         @db.Text
+  created_by_id              String?
+  created_date               DateTime        @default(now()) @map("created_date")
+  updated_date               DateTime        @updatedAt @map("updated_date")
+
+  @@map("admission_applications")
+}
+
+model ArchivedStudent {
+  id               String   @id @default(cuid())
+  student_id       String?
+  admission_number String?
+  first_name       String?
+  last_name        String?
+  middle_name      String?
+  date_of_birth    String?
+  gender           String?
+  passport_photo   String?  @db.Text
+  section          Section?
+  year_admitted    String?
+  year_archived    String?
+  // field name aligned with base44 (last_class kept for legacy)
+  last_class       String?
+  final_class      String?
+  archive_reason   String?  @default("Graduated")
+  archive_notes    String?  @db.Text
+  parent_name      String?
+  parent_phone     String?
+  parent_email     String?
+  address          String?  @db.Text
+  blood_group      String?
+  genotype         String?
+  state_of_origin  String?
+  local_government String?
+  tribe            String?
+  sport_house      String?
+  weight           Float?
+  height           Float?
+  results_snapshot    Json?
+  fee_payments_snapshot Json?
+  // Legacy fields
+  results_summary  Json?
+  payments_summary Json?
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("archived_students")
+}
+
+model SchoolProject {
+  id                   String              @id @default(cuid())
+  project_name         String
+  description          String?             @db.Text
+  status               SchoolProjectStatus @default(Planned)
+  term                 Term?
+  session              String?
+  start_date           String?
+  expected_completion  String?
+  actual_completion    String?
+  total_cost           Float?
+  amount_paid          Float               @default(0)
+  balance              Float               @default(0)
+  sponsor_type         ProjectSponsorType  @default(School)
+  sponsors             Json?
+  contractors          Json?
+  progress_percentage  Float               @default(0)
+  progress_notes       String?             @db.Text
+  is_parent_visible    Boolean             @default(true)
+  created_date         DateTime            @default(now()) @map("created_date")
+  updated_date         DateTime            @updatedAt @map("updated_date")
+
+  @@map("school_projects")
+}
+
+model DirectorNotification {
+  id           String                   @id @default(cuid())
+  title        String
+  message      String                   @db.Text
+  type         DirectorNotificationType @default(admission)
+  read         Boolean                  @default(false)
+  reference_id String?
+  created_date DateTime                 @default(now()) @map("created_date")
+  updated_date DateTime                 @updatedAt @map("updated_date")
+
+  @@map("director_notifications")
+}
+
+model Newsletter {
+  id             String           @id @default(cuid())
+  title          String
+  term           Term?
+  session        String?
+  content        String?          @db.Text
+  attachment_url String?          @db.Text
+  image_url      String?          @db.Text
+  author         String?
+  status         NewsletterStatus @default(Draft)
+  published_at   String?
+  published_date String?
+  created_date   DateTime         @default(now()) @map("created_date")
+  updated_date   DateTime         @updatedAt @map("updated_date")
+
+  @@map("newsletters")
+}
+
+model Gallery {
+  id           String          @id @default(cuid())
+  title        String?
+  category     String?
+  description  String?         @db.Text
+  // Multi-image support (base44)
+  images       Json?
+  // Single-image legacy field (kept for existing data)
+  image_url    String?         @db.Text
+  date         String?
+  status       String?         @default("Published")
+  uploaded_by  String?
+  created_date DateTime        @default(now()) @map("created_date")
+  updated_date DateTime        @updatedAt @map("updated_date")
+
+  @@map("gallery")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  // base44 fields
+  from_user_id   String?
+  from_name      String?
+  from_email     String?
+  from_phone     String?
+  to_user_id     String?
+  to_name        String?
+  subject        String?
+  content        String?  @db.Text
+  message_type   String?
+  related_student_id String?
+  read           Boolean  @default(false)
+  replied        Boolean  @default(false)
+  // Legacy fields
+  sender_id      String?
+  sender_name    String?
+  sender_role    String?
+  recipient_id   String?
+  recipient_name String?
+  is_read        Boolean  @default(false)
+  created_date   DateTime @default(now()) @map("created_date")
+  updated_date   DateTime @updatedAt @map("updated_date")
+
+  @@map("messages")
+}
+
+model ChatMessage {
+  id              String   @id @default(cuid())
+  conversation_id String?
+  sender_id       String?
+  sender_name     String
+  sender_role     String?
+  recipient_id    String?
+  recipient_name  String?
+  channel         String?  @default("General")
+  content         String?  @db.Text
+  // Legacy field
+  message         String?  @db.Text
+  message_type    String?  @default("text")
+  attachment_url  String?  @db.Text
+  file_url        String?  @db.Text
+  voice_duration  Float?
+  is_broadcast    Boolean  @default(false)
+  target_audience String?  @default("All")
+  is_read         Boolean  @default(false)
+  read            Boolean  @default(false)
+  created_date    DateTime @default(now()) @map("created_date")
+  updated_date    DateTime @updatedAt @map("updated_date")
+
+  @@map("chat_messages")
+}
+
+model ChatPresence {
+  id           String   @id @default(cuid())
+  user_id      String   @unique
+  user_name    String
+  user_role    String?
+  is_online    Boolean  @default(false)
+  last_seen    String?
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("chat_presences")
+}
+
+model Meeting {
+  id              String        @id @default(cuid())
+  title           String
+  description     String?       @db.Text
+  meeting_url     String
+  meeting_id      String?
+  meeting_passcode String?
+  created_by      String?
+  created_name    String?
+  start_time      String?
+  end_time        String?
+  status          MeetingStatus @default(Scheduled)
+  recording_url   String?       @db.Text
+  target_audience String?       @default("All")
+  created_date    DateTime      @default(now()) @map("created_date")
+  updated_date    DateTime      @updatedAt @map("updated_date")
+
+  @@map("meetings")
+}
+
+model PTAMeeting {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?  @db.Text
+  date            String
+  time            String?
+  venue_or_link   String?  @db.Text
+  status          String?  @default("Upcoming")
+  agenda          Json?
+  meeting_minutes String?  @db.Text
+  created_date    DateTime @default(now()) @map("created_date")
+  updated_date    DateTime @updatedAt @map("updated_date")
+
+  @@map("pta_meetings")
+}
+
+model Award {
+  id               String    @id @default(cuid())
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String?
+  section          Section?
+  award_type       String?
+  award_name       String?
+  // Legacy field
+  title            String?
+  description      String?   @db.Text
+  date_awarded     String?
+  // Legacy field
+  date             String?
+  term             Term?
+  session          String?
+  awarded_by       String?
+  certificate_url  String?   @db.Text
+  created_date     DateTime  @default(now()) @map("created_date")
+  updated_date     DateTime  @updatedAt @map("updated_date")
+
+  @@map("awards")
+}
+
+model Discipline {
+  id               String   @id @default(cuid())
+  student_id       String
+  student_name     String?
+  admission_number String?
+  class            String?
+  section          Section?
+  incident_date    String?
+  incident_type    String?
+  // Legacy field
+  type             String?
+  description      String?  @db.Text
+  action_taken     String?  @db.Text
+  reported_by      String?
+  // Legacy field
+  recorded_by      String?
+  status           String?  @default("Pending")
+  term             Term?
+  session          String?
+  created_date     DateTime @default(now()) @map("created_date")
+  updated_date     DateTime @updatedAt @map("updated_date")
+
+  @@map("disciplines")
+}
+
+model Rating {
+  id           String   @id @default(cuid())
+  // base44 fields (school rating/review system)
+  user_name    String?
+  user_email   String?
+  user_type    String?
+  rating       Int?
+  review       String?  @db.Text
+  status       String?  @default("Pending")
+  // Legacy fields (student-teacher rating)
+  student_id   String?
+  teacher_id   String?
+  subject_id   String?
+  score        Float?
+  comment      String?  @db.Text
+  term         Term?
+  session      String?
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("ratings")
+}
+
+model AppLog {
+  id           String   @id @default(cuid())
+  user_id      String?
+  user_email   String?
+  user_role    String?
+  page_name    String
+  ip_address   String?
+  user_agent   String?
+  created_date DateTime @default(now()) @map("created_date")
+
+  @@map("app_logs")
+}
+
+model PublicMessage {
+  id           String   @id @default(cuid())
+  sender_name  String
+  sender_email String?
+  sender_phone String?
+  subject      String?
+  message      String   @db.Text
+  is_read      Boolean  @default(false)
+  created_date DateTime @default(now()) @map("created_date")
+  updated_date DateTime @updatedAt @map("updated_date")
+
+  @@map("public_messages")
+}

@@ -1,7 +1,9 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
 import { generateToken, authenticate } from "../middleware/auth.js";
+import { sendEmail } from "../services/email.js";
 
 const router = Router();
 
@@ -1227,12 +1229,369 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
-    return res.json({ message: "Password updated successfully." });
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/send-password-reset-email — Send Password Reset Link via Resend
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/send-password-reset-email", async (req, res) => {
+  try {
+    const { identifier } = req.body;
+    if (!identifier || !identifier.trim()) {
+      return res
+        .status(400)
+        .json({ error: "Please provide your email, staff ID, or admission number." });
+    }
+
+    const key = identifier.trim();
+    const emailKey = key.toLowerCase();
+
+    let targetEmail = null;
+    let targetName = "User";
+    let entityType = "User";
+    let recordId = null;
+
+    // 1. Look in AdminUser
+    const admin = await prisma.adminUser.findFirst({
+      where: {
+        OR: [{ email: emailKey }, { id: key }],
+      },
+    });
+    if (admin && admin.email) {
+      targetEmail = admin.email;
+      targetName = `${admin.first_name || "Admin"} ${admin.last_name || ""}`.trim();
+      entityType = "AdminUser";
+      recordId = admin.id;
+    }
+
+    // 2. Look in Teacher
+    if (!targetEmail) {
+      const teacher = await prisma.teacher.findFirst({
+        where: {
+          OR: [{ email: emailKey }, { staff_id: key }],
+        },
+      });
+      if (teacher && teacher.email) {
+        targetEmail = teacher.email;
+        targetName = `${teacher.first_name || ""} ${teacher.last_name || ""}`.trim();
+        entityType = "Teacher";
+        recordId = teacher.id;
+      }
+    }
+
+    // 3. Look in Parent
+    if (!targetEmail) {
+      const parent = await prisma.parent.findFirst({
+        where: {
+          OR: [{ email: emailKey }, { parent_id: key }, { phone: key }],
+        },
+      });
+      if (parent && parent.email) {
+        targetEmail = parent.email;
+        targetName = `${parent.first_name || parent.full_name || "Parent"} ${parent.last_name || ""}`.trim();
+        entityType = "Parent";
+        recordId = parent.id;
+      }
+    }
+
+    // 4. Look in Student (sends to parent_email)
+    if (!targetEmail) {
+      const student = await prisma.student.findFirst({
+        where: {
+          OR: [{ admission_number: key }, { parent_email: emailKey }],
+        },
+      });
+      if (student && student.parent_email) {
+        targetEmail = student.parent_email;
+        targetName = `${student.first_name} ${student.last_name}`.trim();
+        entityType = "Student";
+        recordId = student.id;
+      }
+    }
+
+    // 5. Look in NonAcademicStaff
+    if (!targetEmail) {
+      const staff = await prisma.nonAcademicStaff.findFirst({
+        where: {
+          OR: [{ email: emailKey }, { staff_id: key }],
+        },
+      });
+      if (staff && staff.email) {
+        targetEmail = staff.email;
+        targetName = `${staff.first_name || ""} ${staff.last_name || ""}`.trim();
+        entityType = "NonAcademicStaff";
+        recordId = staff.id;
+      }
+    }
+
+    // 6. Look in User table as fallback
+    if (!targetEmail) {
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [{ email: emailKey }, { username: key }],
+        },
+      });
+      if (user && user.email) {
+        targetEmail = user.email;
+        targetName = `${user.first_name || ""} ${user.last_name || ""}`.trim() || "User";
+        entityType = user.profile_type || "User";
+        recordId = user.profile_id || user.id;
+      }
+    }
+
+    if (!targetEmail) {
+      return res.status(404).json({
+        error: "No account found matching this identifier or no registered email address on file.",
+      });
+    }
+
+    // Create a secure 1-hour JWT token for password reset
+    const jwtSecret = process.env.JWT_SECRET || "milton_jwt_secret_fallback";
+    const resetToken = jwt.sign(
+      {
+        id: recordId,
+        email: targetEmail.toLowerCase(),
+        entity_type: entityType,
+        purpose: "password-reset",
+      },
+      jwtSecret,
+      { expiresIn: "1h" }
+    );
+
+    // Determine client origin URL
+    const rawOrigin = req.headers.origin || req.headers.referer || process.env.CLIENT_ORIGIN || "https://www.milton-college.com.ng";
+    const originUrl = rawOrigin.replace(/\/+$/, "");
+    const resetLink = `${originUrl}/ResetPassword?token=${encodeURIComponent(resetToken)}`;
+
+    // Prepare rich HTML email
+    const subject = "Password Reset Request — Milton College Portal";
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 0; }
+          .container { max-width: 560px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .header { background: #1e3a5f; color: #ffffff; padding: 32px; text-align: center; }
+          .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+          .header p { margin: 6px 0 0 0; color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; }
+          .content { padding: 32px; color: #334155; line-height: 1.6; }
+          .content p { margin: 0 0 16px 0; font-size: 15px; }
+          .btn-container { text-align: center; margin: 28px 0; }
+          .btn { display: inline-block; background: #1e3a5f; color: #ffffff !important; text-decoration: none; padding: 14px 32px; border-radius: 10px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(30,58,95,0.25); }
+          .btn:hover { background: #2b4c7e; }
+          .link-fallback { background: #f1f5f9; padding: 12px; border-radius: 8px; font-size: 12px; word-break: break-all; color: #475569; }
+          .footer { background: #f8fafc; padding: 20px 32px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Milton College</h1>
+            <p>Portal Security</p>
+          </div>
+          <div class="content">
+            <p>Hello <strong>${targetName}</strong>,</p>
+            <p>We received a request to reset your password for your Milton College Portal account.</p>
+            <p>Click the button below to choose a new password. This link is valid for <strong>1 hour</strong>.</p>
+            
+            <div class="btn-container">
+              <a href="${resetLink}" class="btn" target="_blank">Reset Password</a>
+            </div>
+
+            <p style="font-size: 13px; color: #64748b;">If the button above does not work, copy and paste this link into your web browser:</p>
+            <div class="link-fallback">${resetLink}</div>
+
+            <p style="margin-top: 24px; font-size: 13px; color: #94a3b8;">
+              If you did not request this password reset, please ignore this email. Your password will remain unchanged.
+            </p>
+          </div>
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} Milton College. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const textBody = `Hello ${targetName},\n\nYou requested a password reset for your Milton College Portal account.\n\nUse this link to reset your password (valid for 1 hour):\n${resetLink}\n\nIf you did not request this, you can safely ignore this email.\n\nMilton College Administration`;
+
+    // Send email via Resend SMTP
+    await sendEmail({
+      to: targetEmail,
+      subject,
+      text: textBody,
+      html: htmlBody,
+    });
+
+    const maskedEmail = targetEmail.replace(/(.{2})(.*)(@.*)/, "$1***$3");
+    return res.json({
+      success: true,
+      message: `A password reset link has been sent to ${maskedEmail}. Please check your inbox or spam folder.`,
+      masked_email: maskedEmail,
+    });
   } catch (err) {
-    console.error("[auth/reset-password]", err);
-    return res
-      .status(500)
-      .json({ error: "Failed to reset password. Please try again." });
+    console.error("[auth/send-password-reset-email]", err);
+    return res.status(500).json({
+      error: "Failed to send password reset email. Please verify your email configuration or try again.",
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/verify-reset-token — Verify Token Validity
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/verify-reset-token", async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: "Reset token is required." });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET || "milton_jwt_secret_fallback";
+    let decoded;
+    try {
+      decoded = jwt.verify(token, jwtSecret);
+    } catch (err) {
+      if (err.name === "TokenExpiredError") {
+        return res
+          .status(400)
+          .json({ error: "This password reset link has expired. Please request a new one." });
+      }
+      return res
+        .status(400)
+        .json({ error: "Invalid password reset link." });
+    }
+
+    if (decoded.purpose !== "password-reset") {
+      return res.status(400).json({ error: "Invalid token purpose." });
+    }
+
+    const maskedEmail = (decoded.email || "").replace(/(.{2})(.*)(@.*)/, "$1***$3");
+    return res.json({
+      valid: true,
+      email: decoded.email,
+      masked_email: maskedEmail,
+      entity_type: decoded.entity_type,
+    });
+  } catch (err) {
+    console.error("[auth/verify-reset-token]", err);
+    return res.status(500).json({ error: "Failed to verify reset token." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/complete-password-reset — Set New Password from Token
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/complete-password-reset", async (req, res) => {
+  try {
+    const { token, new_password } = req.body;
+    if (!token || !new_password) {
+      return res.status(400).json({ error: "Token and new password are required." });
+    }
+
+    if (new_password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters long." });
+    }
+
+    const jwtSecret = process.env.JWT_SECRET || "milton_jwt_secret_fallback";
+    let decoded;
+    try {
+      decoded = jwt.verify(token, jwtSecret);
+    } catch (err) {
+      if (err.name === "TokenExpiredError") {
+        return res
+          .status(400)
+          .json({ error: "This password reset link has expired. Please request a new one." });
+      }
+      return res.status(400).json({ error: "Invalid or expired password reset link." });
+    }
+
+    if (decoded.purpose !== "password-reset") {
+      return res.status(400).json({ error: "Invalid token purpose." });
+    }
+
+    const { id: recordId, email: targetEmail, entity_type: entityType } = decoded;
+    const hashedPassword = await bcrypt.hash(new_password, 12);
+
+    // Update in role-specific entity table
+    switch (entityType) {
+      case "AdminUser":
+        await prisma.adminUser.updateMany({
+          where: {
+            OR: [
+              ...(recordId ? [{ id: recordId }] : []),
+              ...(targetEmail ? [{ email: targetEmail }] : []),
+            ],
+          },
+          data: { password: hashedPassword },
+        });
+        break;
+      case "Teacher":
+        await prisma.teacher.updateMany({
+          where: {
+            OR: [
+              ...(recordId ? [{ id: recordId }] : []),
+              ...(targetEmail ? [{ email: targetEmail }] : []),
+            ],
+          },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "Parent":
+        await prisma.parent.updateMany({
+          where: {
+            OR: [
+              ...(recordId ? [{ id: recordId }] : []),
+              ...(targetEmail ? [{ email: targetEmail }] : []),
+            ],
+          },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "Student":
+        await prisma.student.updateMany({
+          where: {
+            OR: [
+              ...(recordId ? [{ id: recordId }] : []),
+              ...(targetEmail ? [{ parent_email: targetEmail }] : []),
+            ],
+          },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+      case "NonAcademicStaff":
+        await prisma.nonAcademicStaff.updateMany({
+          where: {
+            OR: [
+              ...(recordId ? [{ id: recordId }] : []),
+              ...(targetEmail ? [{ email: targetEmail }] : []),
+            ],
+          },
+          data: { custom_password: hashedPassword },
+        });
+        break;
+    }
+
+    // Always synchronize the User table
+    await prisma.user.updateMany({
+      where: {
+        OR: [
+          ...(recordId ? [{ id: recordId }, { profile_id: recordId }] : []),
+          ...(targetEmail ? [{ email: targetEmail }, { username: targetEmail }] : []),
+        ],
+      },
+      data: { password: hashedPassword },
+    });
+
+    return res.json({
+      success: true,
+      message: "Your password has been successfully updated. You can now log in.",
+    });
+  } catch (err) {
+    console.error("[auth/complete-password-reset]", err);
+    return res.status(500).json({ error: "Failed to reset password. Please try again." });
   }
 });
 

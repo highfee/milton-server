@@ -52,6 +52,108 @@ async function syncGenericUser({
   return prisma.user.create({ data });
 }
 
+async function resolveStaffRoles(email, staffId, defaultType) {
+  const rolesSet = new Set();
+
+  if (defaultType === "Principal") rolesSet.add("principal");
+  if (defaultType === "Head Teacher") rolesSet.add("head_teacher");
+  if (
+    defaultType === "Class Teacher" ||
+    defaultType === "Subject Teacher" ||
+    defaultType === "Form Teacher"
+  )
+    rolesSet.add("teacher");
+
+  if (email || staffId) {
+    const staffRoles = await prisma.staffRole
+      .findMany({
+        where: {
+          OR: [
+            ...(email ? [{ user_email: email.toLowerCase() }] : []),
+            ...(staffId
+              ? [{ user_id: staffId }, { teacher_id: staffId }]
+              : []),
+          ],
+          status: "Active",
+        },
+      })
+      .catch(() => []);
+
+    for (const sr of staffRoles) {
+      if (sr.role === "Admin") rolesSet.add("admin");
+      if (sr.role === "Principal") rolesSet.add("principal");
+      if (sr.role === "Head_Teacher" || sr.role === "Head Teacher")
+        rolesSet.add("head_teacher");
+      if (sr.role === "Accountant") rolesSet.add("accountant");
+      if (sr.role === "Teacher") rolesSet.add("teacher");
+    }
+  }
+
+  if (email) {
+    const adminUser = await prisma.adminUser
+      .findUnique({ where: { email: email.toLowerCase() } })
+      .catch(() => null);
+    if (adminUser) rolesSet.add("admin");
+  }
+
+  const teacher =
+    staffId || email
+      ? await prisma.teacher
+          .findFirst({
+            where: {
+              OR: [
+                ...(staffId ? [{ staff_id: staffId }] : []),
+                ...(email ? [{ email: email.toLowerCase() }] : []),
+              ],
+            },
+          })
+          .catch(() => null)
+      : null;
+
+  if (teacher) {
+    if (teacher.teacher_type === "Principal") rolesSet.add("principal");
+    if (teacher.teacher_type === "Head Teacher") rolesSet.add("head_teacher");
+    if (
+      teacher.teacher_type === "Class Teacher" ||
+      teacher.teacher_type === "Subject Teacher" ||
+      teacher.teacher_type === "Form Teacher" ||
+      teacher.assigned_class ||
+      teacher.form_teacher_class ||
+      (teacher.assigned_subjects &&
+        Array.isArray(teacher.assigned_subjects) &&
+        teacher.assigned_subjects.length > 0)
+    ) {
+      rolesSet.add("teacher");
+    }
+  }
+
+  const roleHierarchy = [
+    "admin",
+    "principal",
+    "head_teacher",
+    "accountant",
+    "teacher",
+    "student",
+    "parent",
+  ];
+  let highestRole = defaultType
+    ? defaultType.toLowerCase().replace(" ", "_")
+    : "teacher";
+
+  for (const h of roleHierarchy) {
+    if (rolesSet.has(h)) {
+      highestRole = h;
+      break;
+    }
+  }
+
+  if (rolesSet.size === 0 && highestRole) {
+    rolesSet.add(highestRole);
+  }
+
+  return { highestRole, roles: Array.from(rolesSet) };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/auth/login — Unified login across all authenticated roles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,10 +182,17 @@ router.post("/login", async (req, res) => {
         : password === genericUser.password;
 
       if (valid) {
+        const { highestRole, roles } = await resolveStaffRoles(
+          genericUser.email,
+          genericUser.username,
+          genericUser.role
+        );
+
         const token = generateToken({
           id: genericUser.id,
           email: genericUser.email || "",
-          role: genericUser.role,
+          role: highestRole,
+          roles,
           username: genericUser.username,
           name: `${genericUser.first_name || ""} ${genericUser.last_name || ""}`.trim(),
           profile_type: genericUser.profile_type,
@@ -96,7 +205,8 @@ router.post("/login", async (req, res) => {
             id: genericUser.id,
             email: genericUser.email,
             username: genericUser.username,
-            role: genericUser.role,
+            role: highestRole,
+            roles,
             first_name: genericUser.first_name,
             last_name: genericUser.last_name,
             profile_type: genericUser.profile_type,
@@ -112,11 +222,17 @@ router.post("/login", async (req, res) => {
     if (admin) {
       const valid = await bcrypt.compare(password, admin.password);
       if (valid) {
+        const { highestRole, roles } = await resolveStaffRoles(
+          admin.email,
+          admin.email,
+          admin.role
+        );
+
         await syncGenericUser({
           email: admin.email,
           username: admin.email,
           password: admin.password,
-          role: admin.role,
+          role: highestRole,
           first_name: admin.first_name,
           last_name: admin.last_name,
           profile_type: "AdminUser",
@@ -126,7 +242,8 @@ router.post("/login", async (req, res) => {
         const token = generateToken({
           id: admin.id,
           email: admin.email,
-          role: admin.role,
+          role: highestRole,
+          roles,
           username: admin.email,
           name: `${admin.first_name} ${admin.last_name}`,
           profile_type: "AdminUser",
@@ -139,7 +256,8 @@ router.post("/login", async (req, res) => {
             id: admin.id,
             email: admin.email,
             username: admin.email,
-            role: admin.role,
+            role: highestRole,
+            roles,
             first_name: admin.first_name,
             last_name: admin.last_name,
             profile_type: "AdminUser",
@@ -149,8 +267,10 @@ router.post("/login", async (req, res) => {
       }
     }
 
-    const teacher = await prisma.teacher.findUnique({
-      where: { staff_id: loginKey },
+    const teacher = await prisma.teacher.findFirst({
+      where: {
+        OR: [{ staff_id: loginKey }, { email: emailKey }],
+      },
     });
     if (teacher) {
       let valid = false;
@@ -166,15 +286,17 @@ router.post("/login", async (req, res) => {
       }
 
       if (valid) {
-        let role = "teacher";
-        if (teacher.teacher_type === "Head Teacher") role = "head_teacher";
-        if (teacher.teacher_type === "Principal") role = "principal";
+        const { highestRole, roles } = await resolveStaffRoles(
+          teacher.email,
+          teacher.staff_id,
+          teacher.teacher_type
+        );
 
         await syncGenericUser({
           email: teacher.email,
           username: teacher.staff_id,
           password: teacher.custom_password || "User123",
-          role,
+          role: highestRole,
           first_name: teacher.first_name,
           last_name: teacher.last_name,
           profile_type: "Teacher",
@@ -184,7 +306,8 @@ router.post("/login", async (req, res) => {
         const token = generateToken({
           id: teacher.id,
           email: teacher.email,
-          role,
+          role: highestRole,
+          roles,
           username: teacher.staff_id,
           name: `${teacher.first_name} ${teacher.last_name}`,
           profile_type: "Teacher",
@@ -197,7 +320,8 @@ router.post("/login", async (req, res) => {
             id: teacher.id,
             email: teacher.email,
             username: teacher.staff_id,
-            role,
+            role: highestRole,
+            roles,
             first_name: teacher.first_name,
             last_name: teacher.last_name,
             profile_type: "Teacher",
@@ -413,16 +537,17 @@ router.post("/teacher-login", async (req, res) => {
       return res.status(401).json({ error: "Invalid Staff ID or password." });
     }
 
-    // Determine role from teacher_type
-    let role = "teacher";
-    if (teacher.teacher_type === "Head Teacher") role = "head_teacher";
-    if (teacher.teacher_type === "Principal") role = "principal";
+    const { highestRole, roles } = await resolveStaffRoles(
+      teacher.email,
+      teacher.staff_id,
+      teacher.teacher_type
+    );
 
     await syncGenericUser({
       email: teacher.email,
       username: teacher.staff_id,
       password: teacher.custom_password || "User123",
-      role,
+      role: highestRole,
       first_name: teacher.first_name,
       last_name: teacher.last_name,
       profile_type: "Teacher",
@@ -432,7 +557,8 @@ router.post("/teacher-login", async (req, res) => {
     const token = generateToken({
       id: teacher.id,
       email: teacher.email,
-      role,
+      role: highestRole,
+      roles,
       staff_id: teacher.staff_id,
       name: `${teacher.first_name} ${teacher.last_name}`,
       teacher_type: teacher.teacher_type,
@@ -451,7 +577,8 @@ router.post("/teacher-login", async (req, res) => {
         assigned_class: teacher.assigned_class,
         assigned_subjects: teacher.assigned_subjects,
         form_teacher_class: teacher.form_teacher_class,
-        role,
+        role: highestRole,
+        roles,
       },
     });
   } catch (err) {

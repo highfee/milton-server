@@ -67,9 +67,13 @@ export function authorize(...roles) {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated.' });
     }
-    if (roles.length > 0 && !roles.includes(req.user.role)) {
+    const userRoles = Array.isArray(req.user.roles) && req.user.roles.length > 0 
+      ? req.user.roles 
+      : [req.user.role];
+    const hasRole = roles.length === 0 || roles.some(r => userRoles.includes(r));
+    if (!hasRole) {
       return res.status(403).json({
-        error: `Access denied. Required role(s): ${roles.join(', ')}. Your role: ${req.user.role}`,
+        error: `Access denied. Required role(s): ${roles.join(', ')}. Your role(s): ${userRoles.join(', ')}`,
       });
     }
     next();

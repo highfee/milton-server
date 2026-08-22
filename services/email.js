@@ -1,75 +1,85 @@
 import nodemailer from "nodemailer";
 
-let transporter = null;
+let etherealTransporter = null;
 
-function getTransporter() {
-  if (transporter) return transporter;
-
-  const apiKey = process.env.RESEND_API_KEY;
-
-  if (apiKey) {
-    // Use Resend SMTP — best deliverability, no exposed client-side keys
-    transporter = nodemailer.createTransport({
-      host: "smtp.resend.com",
-      port: 465,
-      secure: true,
-      tls: {
-        // Allow self-signed certs in local/dev environments when necessary.
-        // This is scoped to the Resend transport only to avoid global TLS relaxation.
-        rejectUnauthorized: false,
-      },
-      auth: {
-        user: "resend",
-        pass: apiKey,
-      },
-    });
-    console.log("[Email] Using Resend SMTP transport");
-  } else {
-    // Fallback: Ethereal (for development — catches emails in a test inbox)
-    console.warn(
-      "[Email] RESEND_API_KEY not set — using Ethereal dev transport",
-    );
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      auth: {
-        user: process.env.ETHEREAL_USER || "ethereal_user@ethereal.email",
-        pass: process.env.ETHEREAL_PASS || "ethereal_pass",
-      },
-    });
-  }
-
-  return transporter;
+function getEtherealTransporter() {
+  if (etherealTransporter) return etherealTransporter;
+  console.warn("[Email] RESEND_API_KEY not set — using Ethereal dev transport");
+  etherealTransporter = nodemailer.createTransport({
+    host: "smtp.ethereal.email",
+    port: 587,
+    auth: {
+      user: process.env.ETHEREAL_USER || "ethereal_user@ethereal.email",
+      pass: process.env.ETHEREAL_PASS || "ethereal_pass",
+    },
+  });
+  return etherealTransporter;
 }
 
 /**
- * sendEmail — Send an email using the configured transporter.
+ * sendEmail — Send an email using Resend HTTPS API (or Ethereal fallback).
  *
  * @param {object} options
- * @param {string}   options.to       - Recipient email
- * @param {string}   options.subject  - Email subject
- * @param {string}   options.text     - Plain text body
- * @param {string}   [options.html]   - HTML body (optional)
- * @param {string}   [options.from]   - Override from address
- * @returns {Promise<object>} Nodemailer send result
+ * @param {string|string[]} options.to       - Recipient email
+ * @param {string}          options.subject  - Email subject
+ * @param {string}          options.text     - Plain text body
+ * @param {string}          [options.html]   - HTML body (optional)
+ * @param {string}          [options.from]   - Override from address
+ * @returns {Promise<object>} Result
  */
 export async function sendEmail({ to, subject, text, html, from }) {
-  const t = getTransporter();
+  const apiKey = process.env.RESEND_API_KEY;
+  const toList = Array.isArray(to) ? to : [to];
+
+  // Default from address: if not provided and not in env, use Resend default sandbox sender
   const fromAddress =
     from ||
     process.env.EMAIL_FROM ||
-    "Milton College <noreply@miltoncollegeportal.com>";
+    "Milton College <onboarding@resend.dev>";
 
+  if (apiKey) {
+    // Send via Resend HTTPS REST API (Port 443 — immune to cloud SMTP port blocks on Render/AWS/Vercel)
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: toList,
+          subject,
+          text,
+          ...(html ? { html } : {}),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error("[Email/Resend API Error]", data);
+        throw new Error(data.message || `Resend API Error: ${response.statusText}`);
+      }
+
+      console.log(`[Email/Resend] Sent to ${toList.join(", ")} | Subject: ${subject} | ID: ${data.id}`);
+      return { success: true, messageId: data.id, ...data };
+    } catch (err) {
+      console.error("[Email/Resend Failed]", err.message);
+      throw err;
+    }
+  }
+
+  // Fallback: Ethereal transport
+  const t = getEtherealTransporter();
   const info = await t.sendMail({
     from: fromAddress,
-    to,
+    to: toList.join(", "),
     subject,
     text,
     ...(html ? { html } : {}),
   });
 
-  console.log(
-    `[Email] Sent to ${to} | Subject: ${subject} | MessageId: ${info.messageId}`,
-  );
+  console.log(`[Email/Ethereal] Sent to ${toList.join(", ")} | Subject: ${subject} | MessageId: ${info.messageId}`);
   return info;
 }

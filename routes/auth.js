@@ -1229,6 +1229,13 @@ router.post("/reset-password", async (req, res) => {
       });
     }
 
+    return res.json({ success: true, message: "Password updated successfully." });
+  } catch (err) {
+    console.error("[auth/reset-password]", err);
+    return res.status(500).json({ error: "Failed to reset password. Please try again." });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/auth/send-password-reset-email — Send Password Reset Link via Resend
 // ─────────────────────────────────────────────────────────────────────────────

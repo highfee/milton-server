@@ -25,3 +25,4 @@ old data/
 *.csv
 base44Schema.txt
 *.zip
+uploads/

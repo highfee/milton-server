@@ -17,8 +17,8 @@ export const ROLE_RULES = {
     list: null,
     filter: null,
     get: null,
-    create: ["admin"],
-    update: ["admin"],
+    create: ["admin", "principal"],
+    update: ["admin", "principal"],
     delete: ["admin"],
   },
 
@@ -26,18 +26,18 @@ export const ROLE_RULES = {
     list: null,
     filter: null,
     get: null,
-    create: ["admin"],
-    update: ["admin"],
-    delete: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
+    update: ["admin", "principal", "head_teacher"],
+    delete: ["admin", "principal"],
   },
 
   Calendar: {
     list: null,
     filter: null,
     get: null,
-    create: ["admin"],
-    update: ["admin"],
-    delete: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
+    update: ["admin", "principal", "head_teacher"],
+    delete: ["admin", "principal"],
   },
 
   Holiday: {
@@ -53,9 +53,9 @@ export const ROLE_RULES = {
     list: null,
     filter: null,
     get: null,
-    create: ["admin"],
-    update: ["admin"],
-    delete: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
+    update: ["admin", "principal", "head_teacher"],
+    delete: ["admin", "principal"],
   },
 
   // ── Students ──
@@ -63,9 +63,9 @@ export const ROLE_RULES = {
     list: [],
     filter: [],
     get: [],
-    create: ["admin"],
-    update: ["admin", "principal", "head_teacher", "teacher"],
-    delete: ["admin"],
+    create: ["admin", "principal", "accountant"],
+    update: ["admin", "principal", "head_teacher", "teacher", "accountant"],
+    delete: ["admin", "principal"],
   },
 
   ArchivedStudent: {
@@ -73,7 +73,7 @@ export const ROLE_RULES = {
     filter: ["admin", "principal", "head_teacher"],
     get: ["admin", "principal", "head_teacher"],
     create: ["admin", "principal", "head_teacher"],
-    update: ["admin"],
+    update: ["admin", "principal"],
     delete: ["admin"],
   },
 
@@ -82,36 +82,36 @@ export const ROLE_RULES = {
     list: [],
     filter: [],
     get: [],
-    create: ["admin"],
+    create: ["admin", "principal"],
     update: ["admin", "teacher", "head_teacher", "principal"],
     delete: ["admin"],
   },
 
   NonAcademicStaff: {
-    list: ["admin", "principal"],
-    filter: ["admin", "principal"],
-    get: ["admin", "principal"],
-    create: ["admin"],
-    update: ["admin"],
+    list: ["admin", "principal", "accountant"],
+    filter: ["admin", "principal", "accountant"],
+    get: ["admin", "principal", "accountant"],
+    create: ["admin", "principal", "accountant"],
+    update: ["admin", "principal", "accountant"],
     delete: ["admin"],
   },
 
   // ── Parents ──
   Parent: {
-    list: ["admin", "principal", "head_teacher"],
-    filter: ["admin", "principal", "head_teacher", "parent"],
-    get: ["admin", "principal", "head_teacher", "parent"],
-    create: ["admin"],
-    update: ["admin", "parent"],
+    list: ["admin", "principal", "head_teacher", "accountant"],
+    filter: ["admin", "principal", "head_teacher", "parent", "accountant"],
+    get: ["admin", "principal", "head_teacher", "parent", "accountant"],
+    create: ["admin", "principal", "accountant"],
+    update: ["admin", "principal", "parent", "accountant"],
     delete: ["admin"],
   },
 
   ParentStudent: {
-    list: ["admin", "principal"],
-    filter: ["admin", "principal", "parent"],
-    get: ["admin", "principal", "parent"],
-    create: ["admin"],
-    update: ["admin"],
+    list: ["admin", "principal", "accountant"],
+    filter: ["admin", "principal", "parent", "accountant"],
+    get: ["admin", "principal", "parent", "accountant"],
+    create: ["admin", "principal", "accountant"],
+    update: ["admin", "principal", "accountant"],
     delete: ["admin"],
   },
 
@@ -120,16 +120,16 @@ export const ROLE_RULES = {
     list: [],
     filter: [],
     get: [],
-    create: ["admin"],
-    update: ["admin", "principal"],
-    delete: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
+    update: ["admin", "principal", "head_teacher"],
+    delete: ["admin", "principal"],
   },
 
   SchoolClass: {
     list: [],
     filter: [],
     get: [],
-    create: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
     update: ["admin", "principal", "head_teacher"],
     delete: ["admin"],
   },
@@ -138,7 +138,7 @@ export const ROLE_RULES = {
     list: [],
     filter: [],
     get: [],
-    create: ["admin"],
+    create: ["admin", "principal", "head_teacher"],
     update: ["admin", "principal", "head_teacher"],
     delete: ["admin"],
   },
@@ -147,9 +147,9 @@ export const ROLE_RULES = {
     list: ["admin", "principal"],
     filter: ["admin", "principal", "teacher"],
     get: ["admin", "principal", "teacher"],
-    create: ["admin"],
-    update: ["admin"],
-    delete: ["admin"],
+    create: ["admin", "principal"],
+    update: ["admin", "principal"],
+    delete: ["admin", "principal"],
   },
 
   // ── Results ──
@@ -299,7 +299,7 @@ export const ROLE_RULES = {
 
   // ── Admission ──
   AdmissionApplication: {
-    list: ["admin", "principal"],
+    list: ["admin", "principal", "accountant"],
     filter: null,
     get: null,
     create: null,
@@ -420,11 +420,11 @@ export const ROLE_RULES = {
   },
 
   DirectorNotification: {
-    list: ["admin"],
-    filter: ["admin"],
-    get: ["admin"],
-    create: ["admin"],
-    update: ["admin"],
+    list: ["admin", "principal"],
+    filter: ["admin", "principal"],
+    get: ["admin", "principal"],
+    create: ["admin", "principal"],
+    update: ["admin", "principal"],
     delete: ["admin"],
   },
 

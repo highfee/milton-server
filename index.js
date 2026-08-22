@@ -10,6 +10,7 @@ import sendVerificationEmailRoute from "./routes/functions/sendVerificationEmail
 import sendAdmissionOfferEmailRoute from "./routes/functions/sendAdmissionOfferEmail.js";
 import handleAdmissionResponseRoute from "./routes/functions/handleAdmissionResponse.js";
 import logsRoute from "./routes/logs.js";
+import integrationsRoutes from "./routes/integrations.js";
 
 dotenv.config();
 
@@ -28,6 +29,8 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/entities", entityRoutes);
+app.use("/api/integrations", integrationsRoutes);
+app.use("/api", integrationsRoutes); // Alias for /api/upload & /api/email/send
 app.use("/api/functions/sendVerificationEmail", sendVerificationEmailRoute);
 app.use("/api/functions/sendAdmissionOfferEmail", sendAdmissionOfferEmailRoute);
 app.use("/api/functions/handleAdmissionResponse", handleAdmissionResponseRoute);

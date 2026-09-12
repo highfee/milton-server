@@ -188,12 +188,34 @@ router.post("/login", async (req, res) => {
           genericUser.role
         );
 
+        let resolvedStaffId = null;
+        if (
+          roles.includes("teacher") ||
+          roles.includes("head_teacher") ||
+          roles.includes("principal") ||
+          roles.includes("accountant")
+        ) {
+          const teacherRecord = await prisma.teacher.findFirst({
+            where: {
+              OR: [
+                ...(genericUser.email ? [{ email: genericUser.email.toLowerCase() }] : []),
+                ...(genericUser.username ? [{ staff_id: genericUser.username }] : []),
+                ...(genericUser.profile_id ? [{ id: genericUser.profile_id }] : []),
+              ],
+            },
+          }).catch(() => null);
+          if (teacherRecord) {
+            resolvedStaffId = teacherRecord.staff_id;
+          }
+        }
+
         const token = generateToken({
           id: genericUser.id,
           email: genericUser.email || "",
           role: highestRole,
           roles,
           username: genericUser.username,
+          staff_id: resolvedStaffId || genericUser.username,
           name: `${genericUser.first_name || ""} ${genericUser.last_name || ""}`.trim(),
           profile_type: genericUser.profile_type,
           profile_id: genericUser.profile_id,
@@ -205,6 +227,7 @@ router.post("/login", async (req, res) => {
             id: genericUser.id,
             email: genericUser.email,
             username: genericUser.username,
+            staff_id: resolvedStaffId || genericUser.username,
             role: highestRole,
             roles,
             first_name: genericUser.first_name,
@@ -813,8 +836,32 @@ router.post("/accountant-login", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/auth/me — Returns current authenticated user from JWT
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/me", authenticate, (req, res) => {
-  return res.json(req.user);
+router.get("/me", authenticate, async (req, res) => {
+  try {
+    const user = { ...req.user };
+    if (!user.staff_id) {
+      const teacher = await prisma.teacher.findFirst({
+        where: {
+          OR: [
+            ...(user.email ? [{ email: user.email.toLowerCase() }] : []),
+            ...(user.username ? [{ staff_id: user.username }] : []),
+            ...(user.profile_id ? [{ id: user.profile_id }] : []),
+            ...(user.id ? [{ id: user.id }] : []),
+          ],
+        },
+      }).catch(() => null);
+      if (teacher) {
+        user.staff_id = teacher.staff_id;
+        user.teacher_id = teacher.id;
+        if (!user.first_name) user.first_name = teacher.first_name;
+        if (!user.last_name) user.last_name = teacher.last_name;
+      }
+    }
+    return res.json(user);
+  } catch (err) {
+    console.error("[auth/me]", err);
+    return res.json(req.user);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

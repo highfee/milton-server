@@ -63,8 +63,28 @@ async function resolveStaffRoles(email, staffId, defaultType) {
     defaultType === "Form Teacher"
   )
     rolesSet.add("teacher");
+  if (defaultType === "director" || defaultType === "Director") {
+    rolesSet.add("director");
+    rolesSet.add("admin");
+  }
 
   if (email || staffId) {
+    const userRec = await prisma.user
+      .findFirst({
+        where: {
+          OR: [
+            ...(email ? [{ email: email.toLowerCase() }] : []),
+            ...(staffId ? [{ username: staffId }] : []),
+          ],
+        },
+      })
+      .catch(() => null);
+
+    if (userRec?.profile_type?.toLowerCase() === "director") {
+      rolesSet.add("director");
+      rolesSet.add("admin");
+    }
+
     const staffRoles = await prisma.staffRole
       .findMany({
         where: {
@@ -128,6 +148,7 @@ async function resolveStaffRoles(email, staffId, defaultType) {
   }
 
   const roleHierarchy = [
+    "director",
     "admin",
     "principal",
     "head_teacher",
@@ -914,6 +935,202 @@ router.post("/register-admin", async (req, res) => {
   } catch (err) {
     console.error("[auth/register-admin]", err);
     return res.status(500).json({ error: "Failed to create admin." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/create-director — Admin creates Director account
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/create-director", authenticate, async (req, res) => {
+  try {
+    const requesterRole = req.user?.role;
+    const requesterRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (requesterRole !== "admin" && !requesterRoles.includes("admin")) {
+      return res.status(403).json({ error: "Only administrators can create director accounts." });
+    }
+
+    const { email, first_name, last_name, phone } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: "Director email is required." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const defaultPassword = "User123";
+    const hashedPassword = await bcrypt.hash(defaultPassword, 12);
+
+    const existingUser = await prisma.user.findFirst({
+      where: { email: cleanEmail },
+    });
+
+    let directorUser;
+    if (existingUser) {
+      directorUser = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          role: "admin",
+          profile_type: "director",
+          password: hashedPassword,
+          first_name: first_name?.trim() || existingUser.first_name || "Director",
+          last_name: last_name?.trim() || existingUser.last_name || "",
+        },
+      });
+    } else {
+      directorUser = await prisma.user.create({
+        data: {
+          email: cleanEmail,
+          username: cleanEmail,
+          password: hashedPassword,
+          role: "admin",
+          profile_type: "director",
+          first_name: first_name?.trim() || "Director",
+          last_name: last_name?.trim() || "",
+        },
+      });
+    }
+
+    // Ensure staffRole exists for admin permissions
+    const existingStaffRole = await prisma.staffRole.findFirst({
+      where: { user_email: cleanEmail },
+    });
+    if (!existingStaffRole) {
+      await prisma.staffRole.create({
+        data: {
+          user_email: cleanEmail,
+          user_name: `${directorUser.first_name} ${directorUser.last_name}`.trim(),
+          role: "Admin",
+          status: "Active",
+        },
+      }).catch(() => {});
+    }
+
+    return res.status(201).json({
+      message: "Director account created successfully.",
+      user: {
+        id: directorUser.id,
+        email: directorUser.email,
+        first_name: directorUser.first_name,
+        last_name: directorUser.last_name,
+        role: "director",
+        profile_type: "director",
+        default_password: defaultPassword,
+      },
+    });
+  } catch (err) {
+    console.error("[auth/create-director]", err);
+    return res.status(500).json({ error: "Failed to create director account: " + (err.message || "Unknown error") });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/auth/directors — List all director accounts
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/directors", authenticate, async (req, res) => {
+  try {
+    const requesterRole = req.user?.role;
+    const requesterRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (requesterRole !== "admin" && !requesterRoles.includes("admin") && requesterRole !== "director") {
+      return res.status(403).json({ error: "Access denied." });
+    }
+
+    const directors = await prisma.user.findMany({
+      where: {
+        profile_type: "director",
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        first_name: true,
+        last_name: true,
+        profile_type: true,
+        role: true,
+        created_date: true,
+        updated_date: true,
+      },
+      orderBy: {
+        created_date: "desc",
+      },
+    });
+    return res.json(directors);
+  } catch (err) {
+    console.error("[auth/directors]", err);
+    return res.status(500).json({ error: "Failed to fetch director accounts." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/auth/reset-director-password — Reset director password to default
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/reset-director-password", authenticate, async (req, res) => {
+  try {
+    const requesterRole = req.user?.role;
+    const requesterRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (requesterRole !== "admin" && !requesterRoles.includes("admin")) {
+      return res.status(403).json({ error: "Only administrators can reset director passwords." });
+    }
+
+    const { id, email } = req.body;
+    if (!id && !email) {
+      return res.status(400).json({ error: "Director ID or email is required." });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          ...(id ? [{ id }] : []),
+          ...(email ? [{ email: email.toLowerCase() }] : []),
+        ],
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "Director not found." });
+    }
+
+    const defaultPassword = "User123";
+    const hashedPassword = await bcrypt.hash(defaultPassword, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    return res.json({
+      message: `Password for ${user.email} has been reset to default (${defaultPassword}).`,
+      default_password: defaultPassword,
+    });
+  } catch (err) {
+    console.error("[auth/reset-director-password]", err);
+    return res.status(500).json({ error: "Failed to reset director password." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /api/auth/directors/:id — Delete a director account
+// ─────────────────────────────────────────────────────────────────────────────
+router.delete("/directors/:id", authenticate, async (req, res) => {
+  try {
+    const requesterRole = req.user?.role;
+    const requesterRoles = Array.isArray(req.user?.roles) ? req.user.roles : [];
+    if (requesterRole !== "admin" && !requesterRoles.includes("admin")) {
+      return res.status(403).json({ error: "Only administrators can delete director accounts." });
+    }
+
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      return res.status(404).json({ error: "Director not found." });
+    }
+
+    await prisma.user.delete({ where: { id } });
+    if (user.email) {
+      await prisma.staffRole.deleteMany({ where: { user_email: user.email.toLowerCase() } }).catch(() => {});
+    }
+
+    return res.json({ message: "Director account deleted successfully." });
+  } catch (err) {
+    console.error("[auth/delete-director]", err);
+    return res.status(500).json({ error: "Failed to delete director account." });
   }
 });
 

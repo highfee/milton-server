@@ -832,6 +832,24 @@ export function sanitizeAndCoerce(modelName, data) {
 
   const sanitized = {};
 
+  if (modelName === "AssignmentSubmission") {
+    if (data.content && !data.submission_text) {
+      data.submission_text = data.content;
+    }
+    if (data.attachment_url && !data.file_url) {
+      data.file_url = data.attachment_url;
+    }
+    if (data.feedback && !data.teacher_feedback) {
+      data.teacher_feedback = data.feedback;
+    }
+    if (data.teacher_feedback && !data.feedback) {
+      data.feedback = data.teacher_feedback;
+    }
+    if (data.graded_at && !data.graded_date) {
+      data.graded_date = typeof data.graded_at === "string" ? data.graded_at.split("T")[0] : String(data.graded_at);
+    }
+  }
+
   for (const [key, rawVal] of Object.entries(data)) {
     // Always skip system/meta fields (they are set by Prisma/DB)
     if (

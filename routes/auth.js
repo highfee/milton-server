@@ -65,7 +65,6 @@ async function resolveStaffRoles(email, staffId, defaultType) {
     rolesSet.add("teacher");
   if (defaultType === "director" || defaultType === "Director") {
     rolesSet.add("director");
-    rolesSet.add("admin");
   }
 
   if (email || staffId) {
@@ -82,7 +81,6 @@ async function resolveStaffRoles(email, staffId, defaultType) {
 
     if (userRec?.profile_type?.toLowerCase() === "director") {
       rolesSet.add("director");
-      rolesSet.add("admin");
     }
 
     const staffRoles = await prisma.staffRole
@@ -145,6 +143,11 @@ async function resolveStaffRoles(email, staffId, defaultType) {
     ) {
       rolesSet.add("teacher");
     }
+  }
+
+  // Directors must NOT have the admin role
+  if (rolesSet.has("director")) {
+    rolesSet.delete("admin");
   }
 
   const roleHierarchy = [
@@ -988,20 +991,10 @@ router.post("/create-director", authenticate, async (req, res) => {
       });
     }
 
-    // Ensure staffRole exists for admin permissions
-    const existingStaffRole = await prisma.staffRole.findFirst({
-      where: { user_email: cleanEmail },
-    });
-    if (!existingStaffRole) {
-      await prisma.staffRole.create({
-        data: {
-          user_email: cleanEmail,
-          user_name: `${directorUser.first_name} ${directorUser.last_name}`.trim(),
-          role: "Admin",
-          status: "Active",
-        },
-      }).catch(() => {});
-    }
+    // Directors should not have admin role — clean up any admin StaffRole
+    await prisma.staffRole.deleteMany({
+      where: { user_email: cleanEmail, role: "Admin" },
+    }).catch(() => {});
 
     return res.status(201).json({
       message: "Director account created successfully.",

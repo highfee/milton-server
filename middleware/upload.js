@@ -45,16 +45,19 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+export const MAX_FILE_SIZE_MB = 15;
+export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024; // 15MB limit
+
 // Default upload middleware using memory storage (best for Cloudinary)
 export const upload = multer({
   storage: memoryStorage,
   fileFilter,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit
+  limits: { fileSize: MAX_FILE_SIZE_BYTES },
 });
 
 // Disk upload middleware (for disk fallback)
 export const diskUpload = multer({
   storage: diskStorage,
   fileFilter,
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_SIZE_BYTES },
 });

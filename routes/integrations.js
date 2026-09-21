@@ -2,7 +2,7 @@ import { Router } from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { upload } from "../middleware/upload.js";
+import { upload, MAX_FILE_SIZE_MB, MAX_FILE_SIZE_BYTES } from "../middleware/upload.js";
 import { authenticateOptional } from "../middleware/auth.js";
 import { getCloudinary, uploadBufferToCloudinary } from "../services/cloudinary.js";
 import { sendEmail } from "../services/email.js";
@@ -11,6 +11,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 
 const router = Router();
+
+/**
+ * Multer wrapper that returns clear JSON errors for size limits and disallowed file types
+ */
+const handleMulterUpload = (req, res, next) => {
+  upload.single("file")(req, res, (err) => {
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({
+          error: `File size exceeds the maximum allowed limit of ${MAX_FILE_SIZE_MB}MB. Please choose a smaller file.`,
+          max_size_mb: MAX_FILE_SIZE_MB,
+        });
+      }
+      return res.status(400).json({
+        error: err.message || "Failed to process upload. Please check file type and size.",
+      });
+    }
+    next();
+  });
+};
 
 /**
  * Helper to get the base URL for local file hosting fallback
@@ -28,7 +48,7 @@ function getBaseUrl(req) {
 router.post(
   ["/Core/UploadFile", "/upload"],
   authenticateOptional,
-  upload.single("file"),
+  handleMulterUpload,
   async (req, res) => {
     try {
       let buffer = null;
@@ -55,6 +75,14 @@ router.post(
 
       if (!buffer) {
         return res.status(400).json({ error: "No file provided. Please upload a file." });
+      }
+
+      // Check buffer size for base64 uploads
+      if (buffer.length > MAX_FILE_SIZE_BYTES) {
+        return res.status(400).json({
+          error: `File size exceeds the maximum allowed limit of ${MAX_FILE_SIZE_MB}MB. Please choose a smaller file.`,
+          max_size_mb: MAX_FILE_SIZE_MB,
+        });
       }
 
       // Check if Cloudinary is configured

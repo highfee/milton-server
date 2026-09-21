@@ -863,22 +863,48 @@ router.post("/accountant-login", async (req, res) => {
 router.get("/me", authenticate, async (req, res) => {
   try {
     const user = { ...req.user };
-    if (!user.staff_id) {
-      const teacher = await prisma.teacher.findFirst({
+    const teacher = await prisma.teacher.findFirst({
+      where: {
+        OR: [
+          ...(user.email ? [{ email: user.email.toLowerCase() }] : []),
+          ...(user.username ? [{ staff_id: user.username }] : []),
+          ...(user.staff_id ? [{ staff_id: user.staff_id }] : []),
+          ...(user.profile_id ? [{ id: user.profile_id }] : []),
+          ...(user.id ? [{ id: user.id }] : []),
+        ],
+      },
+    }).catch(() => null);
+
+    if (teacher) {
+      if (!user.staff_id) user.staff_id = teacher.staff_id;
+      user.teacher_id = teacher.id;
+      if (!user.first_name) user.first_name = teacher.first_name;
+      if (!user.last_name) user.last_name = teacher.last_name;
+      user.bank_name = teacher.bank_name || null;
+      user.account_number = teacher.account_number || null;
+      user.account_name = teacher.account_name || null;
+      user.salary = teacher.salary || null;
+      user.phone = teacher.phone || user.phone || null;
+      user.qualification = teacher.qualification || user.qualification || null;
+    } else {
+      const staff = await prisma.nonAcademicStaff.findFirst({
         where: {
           OR: [
             ...(user.email ? [{ email: user.email.toLowerCase() }] : []),
             ...(user.username ? [{ staff_id: user.username }] : []),
+            ...(user.staff_id ? [{ staff_id: user.staff_id }] : []),
             ...(user.profile_id ? [{ id: user.profile_id }] : []),
             ...(user.id ? [{ id: user.id }] : []),
           ],
         },
       }).catch(() => null);
-      if (teacher) {
-        user.staff_id = teacher.staff_id;
-        user.teacher_id = teacher.id;
-        if (!user.first_name) user.first_name = teacher.first_name;
-        if (!user.last_name) user.last_name = teacher.last_name;
+
+      if (staff) {
+        if (!user.staff_id) user.staff_id = staff.staff_id;
+        user.bank_name = staff.bank_name || null;
+        user.account_number = staff.account_number || null;
+        user.account_name = staff.account_name || null;
+        user.salary = staff.salary || null;
       }
     }
     return res.json(user);

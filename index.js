@@ -48,6 +48,25 @@ app.use("/api/*", (req, res) => {
   res.status(404).json({ error: "API endpoint not found" });
 });
 
+// Global error handling middleware (handles Multer errors, payload too large, etc.)
+app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({
+      error: "File size exceeds the maximum allowed limit of 15MB. Please choose a smaller file.",
+      max_size_mb: 15,
+    });
+  }
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({
+      error: "Request entity is too large. Please upload smaller files or data.",
+    });
+  }
+  console.error("[Unhandled Error]", err);
+  res.status(err.status || 500).json({
+    error: err.message || "An unexpected server error occurred.",
+  });
+});
+
 app.listen(PORT, () => {
   console.log(
     `🚀 Milton College Portal Backend running on http://localhost:${PORT}`,

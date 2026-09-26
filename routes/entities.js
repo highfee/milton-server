@@ -240,7 +240,8 @@ router.post(
           if (assignment && assignment.due_date) {
             const dueDate = new Date(assignment.due_date.includes("T") ? assignment.due_date : assignment.due_date + "T23:59:59");
             if (new Date() > dueDate) {
-              const isStaff = ["admin", "teacher", "head_teacher", "principal"].includes(req.user?.role);
+              const userRoles = [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])].map(r => (r || '').toLowerCase());
+              const isStaff = ["admin", "teacher", "head_teacher", "principal", "director"].some(r => userRoles.includes(r));
               if (!isStaff) {
                 return res.status(400).json({ error: "The deadline for this assignment has expired. Submissions are closed." });
               }
@@ -303,7 +304,8 @@ router.patch(
       }
 
       if (model === "AssignmentSubmission") {
-        const isStaff = ["admin", "teacher", "head_teacher", "principal"].includes(req.user?.role);
+        const userRoles = [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])].map(r => (r || '').toLowerCase());
+        const isStaff = ["admin", "teacher", "head_teacher", "principal", "director"].some(r => userRoles.includes(r));
         if (!isStaff) {
           const existingSub = await prisma.assignmentSubmission.findUnique({ where: { id } });
           const assignmentId = rawData.assignment_id || existingSub?.assignment_id;

@@ -72,7 +72,8 @@ export function authorize(...roles) {
         ? req.user.roles 
         : [req.user.role]
     ).map(r => (r || '').toLowerCase());
-    const hasRole = roles.length === 0 || roles.some(r => userRoles.includes((r || '').toLowerCase()));
+    const isSuperUser = userRoles.includes('admin') || userRoles.includes('director');
+    const hasRole = roles.length === 0 || isSuperUser || roles.some(r => userRoles.includes((r || '').toLowerCase()));
     if (!hasRole) {
       return res.status(403).json({
         error: `Access denied. Required role(s): ${roles.join(', ')}. Your role(s): ${userRoles.join(', ')}`,

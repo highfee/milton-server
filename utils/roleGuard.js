@@ -88,12 +88,12 @@ export const ROLE_RULES = {
   },
 
   NonAcademicStaff: {
-    list: ["admin", "principal", "accountant"],
-    filter: ["admin", "principal", "accountant"],
-    get: ["admin", "principal", "accountant"],
-    create: ["admin", "principal", "accountant"],
-    update: ["admin", "principal", "accountant"],
-    delete: ["admin"],
+    list: ["admin", "principal", "accountant", "director"],
+    filter: ["admin", "principal", "accountant", "director"],
+    get: ["admin", "principal", "accountant", "director"],
+    create: ["admin", "principal", "accountant", "director"],
+    update: ["admin", "principal", "accountant", "director"],
+    delete: ["admin", "director"],
   },
 
   // ── Parents ──
@@ -262,39 +262,39 @@ export const ROLE_RULES = {
 
   // ── Fees ──
   SchoolFeePayment: {
-    list: ["admin", "accountant", "principal"],
+    list: ["admin", "accountant", "principal", "director"],
     filter: [],
     get: [],
-    create: ["admin", "accountant"],
-    update: ["admin", "accountant"],
-    delete: ["admin"],
+    create: ["admin", "accountant", "director"],
+    update: ["admin", "accountant", "director"],
+    delete: ["admin", "director"],
   },
 
   FeePayment: {
-    list: ["admin", "accountant", "principal"],
+    list: ["admin", "accountant", "principal", "director"],
     filter: [],
     get: [],
-    create: ["admin", "accountant"],
-    update: ["admin", "accountant"],
-    delete: ["admin"],
+    create: ["admin", "accountant", "director"],
+    update: ["admin", "accountant", "director"],
+    delete: ["admin", "director"],
   },
 
   SalaryPayment: {
-    list: ["admin", "accountant", "principal"],
-    filter: ["admin", "accountant", "principal"],
-    get: ["admin", "accountant", "principal"],
-    create: ["admin", "accountant"],
-    update: ["admin", "accountant"],
-    delete: ["admin"],
+    list: ["admin", "accountant", "principal", "director"],
+    filter: ["admin", "accountant", "principal", "director"],
+    get: ["admin", "accountant", "principal", "director"],
+    create: ["admin", "accountant", "director"],
+    update: ["admin", "accountant", "director"],
+    delete: ["admin", "director"],
   },
 
   Expense: {
-    list: ["admin", "accountant", "principal"],
-    filter: ["admin", "accountant", "principal"],
-    get: ["admin", "accountant", "principal"],
-    create: ["admin", "accountant"],
-    update: ["admin", "accountant", "principal"],
-    delete: ["admin"],
+    list: ["admin", "accountant", "principal", "director"],
+    filter: ["admin", "accountant", "principal", "director"],
+    get: ["admin", "accountant", "principal", "director"],
+    create: ["admin", "accountant", "director"],
+    update: ["admin", "accountant", "principal", "director"],
+    delete: ["admin", "director"],
   },
 
   // ── Admission ──
@@ -373,12 +373,12 @@ export const ROLE_RULES = {
   },
 
   PublicMessage: {
-    list: ["admin", "principal"],
-    filter: ["admin", "principal"],
-    get: ["admin", "principal"],
+    list: ["admin", "principal", "director"],
+    filter: ["admin", "principal", "director"],
+    get: ["admin", "principal", "director"],
     create: null,
-    update: ["admin"],
-    delete: ["admin"],
+    update: ["admin", "director"],
+    delete: ["admin", "director"],
   },
 
   // ── Student Records ──
@@ -411,21 +411,21 @@ export const ROLE_RULES = {
 
   // ── Director / School Projects ──
   SchoolProject: {
-    list: ["admin", "principal"],
-    filter: ["admin", "principal", "parent"],
-    get: ["admin", "principal", "parent"],
-    create: ["admin", "principal"],
-    update: ["admin", "principal"],
-    delete: ["admin"],
+    list: ["admin", "principal", "director"],
+    filter: ["admin", "principal", "parent", "director"],
+    get: ["admin", "principal", "parent", "director"],
+    create: ["admin", "principal", "director"],
+    update: ["admin", "principal", "director"],
+    delete: ["admin", "director"],
   },
 
   DirectorNotification: {
-    list: ["admin", "principal"],
-    filter: ["admin", "principal"],
-    get: ["admin", "principal"],
-    create: ["admin", "principal"],
-    update: ["admin", "principal"],
-    delete: ["admin"],
+    list: ["admin", "principal", "director"],
+    filter: ["admin", "principal", "director"],
+    get: ["admin", "principal", "director"],
+    create: ["admin", "principal", "director"],
+    update: ["admin", "principal", "director"],
+    delete: ["admin", "director"],
   },
 
   // ── Users ──

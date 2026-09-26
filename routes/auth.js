@@ -411,6 +411,7 @@ router.post("/login", async (req, res) => {
           email: student.parent_email || "",
           role: "student",
           username: student.admission_number,
+          admission_number: student.admission_number,
           name: `${student.first_name} ${student.last_name}`,
           profile_type: "Student",
           profile_id: student.id,
@@ -688,8 +689,11 @@ router.post("/student-login", async (req, res) => {
       id: student.id,
       email: student.parent_email || "",
       role: "student",
+      username: student.admission_number,
       admission_number: student.admission_number,
       name: `${student.first_name} ${student.last_name}`,
+      profile_type: "Student",
+      profile_id: student.id,
     });
 
     return res.json({
@@ -1171,6 +1175,22 @@ router.post("/change-password", authenticate, async (req, res) => {
     const profileType = req.user.profile_type;
     const profileId = req.user.profile_id;
     const username = req.user.username;
+    const admissionNumber = req.user.admission_number || (userRole === "student" ? username : null);
+
+    // Find Student record if user is student
+    let studentRecord = null;
+    if (profileType === "Student" || userRole === "student") {
+      studentRecord = await prisma.student.findFirst({
+        where: {
+          OR: [
+            ...(profileId ? [{ id: profileId }] : []),
+            ...(userId ? [{ id: userId }] : []),
+            ...(admissionNumber ? [{ admission_number: admissionNumber }] : []),
+            ...(username ? [{ admission_number: username }] : []),
+          ],
+        },
+      });
+    }
 
     // Find User table record
     const userRecord = await prisma.user.findFirst({
@@ -1179,16 +1199,34 @@ router.post("/change-password", authenticate, async (req, res) => {
           { id: userId },
           ...(userEmail ? [{ email: userEmail }] : []),
           ...(username ? [{ username: username }] : []),
+          ...(admissionNumber ? [{ username: admissionNumber }] : []),
+          ...(profileId ? [{ profile_id: profileId }] : []),
+          ...(studentRecord ? [{ profile_id: studentRecord.id }] : []),
         ],
       },
     });
 
-    if (current_password && userRecord && userRecord.password) {
-      const isBcrypt = userRecord.password.startsWith("$2");
-      const valid = isBcrypt
-        ? await bcrypt.compare(current_password, userRecord.password)
-        : current_password === userRecord.password;
-      if (!valid) {
+    if (current_password) {
+      let valid = false;
+      if (userRecord && userRecord.password) {
+        const isBcrypt = userRecord.password.startsWith("$2");
+        valid = isBcrypt
+          ? await bcrypt.compare(current_password, userRecord.password)
+          : current_password === userRecord.password;
+      }
+      if (!valid && studentRecord) {
+        if (studentRecord.custom_password) {
+          const isBcrypt = studentRecord.custom_password.startsWith("$2");
+          valid = isBcrypt
+            ? await bcrypt.compare(current_password, studentRecord.custom_password)
+            : current_password === studentRecord.custom_password;
+        } else {
+          valid = current_password === "User123";
+        }
+      }
+      if (!valid && !userRecord && !studentRecord) {
+        // Fallback for edge cases without generic user or student record
+      } else if (!valid) {
         return res.status(400).json({ error: "Current password is incorrect." });
       }
     }
@@ -1200,6 +1238,17 @@ router.post("/change-password", authenticate, async (req, res) => {
       await prisma.user.update({
         where: { id: userRecord.id },
         data: { password: hashedPassword },
+      });
+    } else if (studentRecord) {
+      await syncGenericUser({
+        email: studentRecord.parent_email || "",
+        username: studentRecord.admission_number,
+        password: hashedPassword,
+        role: "student",
+        first_name: studentRecord.first_name,
+        last_name: studentRecord.last_name,
+        profile_type: "Student",
+        profile_id: studentRecord.id,
       });
     }
 
@@ -1241,10 +1290,12 @@ router.post("/change-password", authenticate, async (req, res) => {
         });
       }
     } else if (profileType === "Student" || userRole === "student") {
-      const student = await prisma.student.findFirst({
+      const student = studentRecord || await prisma.student.findFirst({
         where: {
           OR: [
             ...(profileId ? [{ id: profileId }] : []),
+            ...(userId ? [{ id: userId }] : []),
+            ...(admissionNumber ? [{ admission_number: admissionNumber }] : []),
             ...(username ? [{ admission_number: username }] : []),
           ],
         },

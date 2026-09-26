@@ -233,6 +233,22 @@ router.post(
         rawData.created_by_id = req.user.id;
       }
 
+      if (model === "AssignmentSubmission") {
+        const assignmentId = rawData.assignment_id;
+        if (assignmentId) {
+          const assignment = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+          if (assignment && assignment.due_date) {
+            const dueDate = new Date(assignment.due_date.includes("T") ? assignment.due_date : assignment.due_date + "T23:59:59");
+            if (new Date() > dueDate) {
+              const isStaff = ["admin", "teacher", "head_teacher", "principal"].includes(req.user?.role);
+              if (!isStaff) {
+                return res.status(400).json({ error: "The deadline for this assignment has expired. Submissions are closed." });
+              }
+            }
+          }
+        }
+      }
+
       const prismaData = sanitizeAndCoerce(model, rawData);
       const record = await db.create({ data: prismaData });
       return res.status(201).json(toUIEnums(record));
@@ -272,6 +288,36 @@ router.patch(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "Student" && req.user?.role === "student") {
+        const studentId = req.user.id || req.user.profile_id;
+        if (studentId !== id) {
+          return res.status(403).json({ error: "You can only update your own student profile." });
+        }
+        const allowedFields = ["passport_photo"];
+        for (const key of Object.keys(rawData)) {
+          if (!allowedFields.includes(key)) {
+            delete rawData[key];
+          }
+        }
+      }
+
+      if (model === "AssignmentSubmission") {
+        const isStaff = ["admin", "teacher", "head_teacher", "principal"].includes(req.user?.role);
+        if (!isStaff) {
+          const existingSub = await prisma.assignmentSubmission.findUnique({ where: { id } });
+          const assignmentId = rawData.assignment_id || existingSub?.assignment_id;
+          if (assignmentId) {
+            const assignment = await prisma.assignment.findUnique({ where: { id: assignmentId } });
+            if (assignment && assignment.due_date) {
+              const dueDate = new Date(assignment.due_date.includes("T") ? assignment.due_date : assignment.due_date + "T23:59:59");
+              if (new Date() > dueDate) {
+                return res.status(400).json({ error: "The deadline for this assignment has expired. Submissions are closed." });
+              }
+            }
+          }
+        }
+      }
 
       const prismaData = sanitizeAndCoerce(model, rawData);
 

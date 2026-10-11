@@ -2,6 +2,20 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'milton_college_dev_secret';
 
+function normalizeDirectorRole(user) {
+  const roles = Array.isArray(user.roles) && user.roles.length > 0
+    ? user.roles
+    : [user.role];
+  if (
+    String(user.profile_type || '').toLowerCase() === 'director' ||
+    roles.some((role) => String(role || '').toLowerCase() === 'director')
+  ) {
+    user.role = 'director';
+    user.roles = ['director'];
+  }
+  return user;
+}
+
 /**
  * authenticate — Verifies JWT from Authorization header.
  * Attaches decoded payload to req.user.
@@ -19,7 +33,7 @@ export function authenticate(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    req.user = normalizeDirectorRole(decoded);
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
@@ -41,7 +55,7 @@ export function authenticateOptional(req, res, next) {
 
   if (token) {
     try {
-      req.user = jwt.verify(token, JWT_SECRET);
+      req.user = normalizeDirectorRole(jwt.verify(token, JWT_SECRET));
     } catch {
       // Invalid token — treat as unauthenticated
       req.user = null;
@@ -72,7 +86,7 @@ export function authorize(...roles) {
         ? req.user.roles 
         : [req.user.role]
     ).map(r => (r || '').toLowerCase());
-    const isSuperUser = userRoles.includes('admin') || userRoles.includes('director');
+    const isSuperUser = userRoles.includes('admin');
     const hasRole = roles.length === 0 || isSuperUser || roles.some(r => userRoles.includes((r || '').toLowerCase()));
     if (!hasRole) {
       return res.status(403).json({

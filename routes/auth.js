@@ -145,9 +145,10 @@ async function resolveStaffRoles(email, staffId, defaultType) {
     }
   }
 
-  // Directors must NOT have the admin role
+  // Director accounts use a single, dedicated portal role.
   if (rolesSet.has("director")) {
-    rolesSet.delete("admin");
+    rolesSet.clear();
+    rolesSet.add("director");
   }
 
   const roleHierarchy = [

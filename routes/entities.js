@@ -454,6 +454,17 @@ router.patch(
         ...rawData
       } = req.body;
 
+      if (model === "Teacher" && req.user?.role === "director") {
+        if (Object.keys(rawData).some((field) => field !== "salary")) {
+          return res.status(403).json({ error: "Directors can only update teacher salary through this endpoint." });
+        }
+        const salary = Number(rawData.salary);
+        if (!Number.isFinite(salary) || salary <= 0) {
+          return res.status(400).json({ error: "Salary must be a valid amount greater than zero." });
+        }
+        rawData.salary = salary;
+      }
+
       if (model === "Assignment") {
         const existingAssignment = await prisma.assignment.findUnique({ where: { id } });
         if (existingAssignment) {

@@ -324,19 +324,9 @@ async function getTeacherParentChatScope(req) {
     teacher.form_teacher_class,
     ...assignedClasses.map(({ name }) => name),
   ].filter(Boolean))];
-  const [classRecords, existingMessages] = await Promise.all([
-    classNames.length
-      ? prisma.schoolClass.findMany({ where: { name: { in: classNames } } })
-      : Promise.resolve([]),
-    prisma.chatMessage.findMany({
-      where: {
-        conversation_id: { startsWith: "parent-chat:" },
-        OR: [{ sender_id: teacher.id }, { recipient_id: teacher.id }],
-      },
-      select: { conversation_id: true },
-      distinct: ["conversation_id"],
-    }),
-  ]);
+  const classRecords = classNames.length
+    ? await prisma.schoolClass.findMany({ where: { name: { in: classNames } } })
+    : [];
   const students = classNames.length
     ? await prisma.student.findMany({
         where: { current_class: { in: classNames }, status: "Active" },
@@ -405,44 +395,6 @@ async function getTeacherParentChatScope(req) {
     matchingParents.forEach((parent) =>
       addConversation(parent, student, `parent-chat:${parent.id}:${student.id}:${teacher.id}`)
     );
-  });
-
-  const oldThreads = existingMessages
-    .map(({ conversation_id }) => {
-      const [, parentId, studentId, recipientId] = String(conversation_id || "").split(":");
-      return recipientId === teacher.id ? { conversation_id, parentId, studentId } : null;
-    })
-    .filter((thread) => thread?.parentId && thread.studentId);
-  const [threadParents, threadStudents] = await Promise.all([
-    oldThreads.length
-      ? prisma.parent.findMany({
-          where: { id: { in: [...new Set(oldThreads.map((thread) => thread.parentId))] } },
-        })
-      : Promise.resolve([]),
-    oldThreads.length
-      ? prisma.student.findMany({
-          where: {
-            id: { in: [...new Set(oldThreads.map((thread) => thread.studentId))] },
-            status: "Active",
-          },
-        })
-      : Promise.resolve([]),
-  ]);
-  const missingClassNames = [...new Set(threadStudents
-    .map((student) => student.current_class)
-    .filter((className) => !classesByName.has(className)))];
-  if (missingClassNames.length) {
-    const additionalClasses = await prisma.schoolClass.findMany({
-      where: { name: { in: missingClassNames } },
-    });
-    additionalClasses.forEach((classRecord) => classesByName.set(classRecord.name, classRecord));
-  }
-  const threadParentsById = new Map(threadParents.map((parent) => [parent.id, parent]));
-  const threadStudentsById = new Map(threadStudents.map((student) => [student.id, student]));
-  oldThreads.forEach((thread) => {
-    const parent = threadParentsById.get(thread.parentId);
-    const student = threadStudentsById.get(thread.studentId);
-    if (parent && student) addConversation(parent, student, thread.conversation_id);
   });
 
   return { teacher, conversations: [...conversationsById.values()] };

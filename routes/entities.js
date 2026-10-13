@@ -252,6 +252,9 @@ async function getParentChatScope(req) {
       conversations.push({
         conversation_id: `parent-chat:${parent.id}:${student.id}:${teacher.id}`,
         parent_id: parent.id,
+        parent_name: parent.full_name ||
+          `${parent.first_name || ""} ${parent.last_name || ""}`.trim() ||
+          "Parent",
         student_id: student.id,
         student_name: `${student.first_name} ${student.last_name}`.trim(),
         student_class: student.current_class,
@@ -448,6 +451,29 @@ router.get("/chat/conversations", authenticate, async (req, res) => {
   } catch (err) {
     console.error("[GET /chat/conversations]", err);
     return res.status(500).json({ error: "Failed to load class chat conversations." });
+  }
+});
+
+router.get("/chat/parent-announcements", authenticate, async (req, res) => {
+  if (!isParentChatUser(req)) {
+    return res.status(403).json({ error: "Only parents can access parent announcements." });
+  }
+
+  try {
+    const announcements = await prisma.message.findMany({
+      where: {
+        message_type: { in: ["Broadcast:All", "Broadcast:Parents"] },
+        sender_role: { in: ["admin", "director"] },
+        recipient_id: null,
+        to_user_id: null,
+      },
+      orderBy: { created_date: "desc" },
+      take: 100,
+    });
+    return res.json(announcements);
+  } catch (err) {
+    console.error("[GET /chat/parent-announcements]", err);
+    return res.status(500).json({ error: "Failed to load parent announcements." });
   }
 });
 
@@ -652,6 +678,32 @@ router.post(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "Message" && String(rawData.message_type || "").startsWith("Broadcast:")) {
+        const roles = [
+          req.user?.role,
+          ...(Array.isArray(req.user?.roles) ? req.user.roles : []),
+        ].map((role) => String(role || "").toLowerCase().replace(/_/g, " "));
+        const isDirector = String(req.user?.profile_type || "").toLowerCase() === "director" ||
+          roles.includes("director");
+        const isAdmin = roles.includes("admin");
+        if (!isDirector && !isAdmin) {
+          return res.status(403).json({ error: "Only directors and administrators can send broadcast announcements." });
+        }
+        if (!["Broadcast:All", "Broadcast:Parents", "Broadcast:Teachers", "Broadcast:Students"].includes(rawData.message_type)) {
+          return res.status(400).json({ error: "Choose a valid broadcast audience." });
+        }
+        if (!String(rawData.subject || "").trim() || !String(rawData.content || "").trim()) {
+          return res.status(400).json({ error: "Announcement title and content are required." });
+        }
+        rawData.sender_id = req.user?.profile_id || req.user?.id;
+        rawData.sender_role = isDirector ? "director" : "admin";
+        rawData.sender_name = isDirector ? "Director's Office" : "Admin Office";
+        rawData.recipient_id = null;
+        rawData.recipient_name = null;
+        rawData.to_user_id = null;
+        rawData.to_name = null;
+      }
 
       if (model === "ChatMessage" && isParentChatUser(req)) {
         const scope = await getParentChatScope(req);

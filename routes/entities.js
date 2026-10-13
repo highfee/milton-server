@@ -122,6 +122,222 @@ function isStudentUser(req) {
     .some((role) => String(role || "").toLowerCase() === "student");
 }
 
+function isParentChatUser(req) {
+  return String(req.user?.profile_type || "").toLowerCase() === "parent" ||
+    [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])]
+      .some((role) => String(role || "").toLowerCase() === "parent");
+}
+
+function isEligibleParentChatStaff(req) {
+  return [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])]
+    .some((role) => ["teacher", "head teacher", "principal"].includes(String(role || "").toLowerCase().replace(/_/g, " ")));
+}
+
+function normalizeChatPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1);
+  if (digits.length === 13 && digits.startsWith("234")) return digits.slice(3);
+  return digits;
+}
+
+function isParentChatConversationId(conversationId) {
+  return typeof conversationId === "string" && conversationId.startsWith("parent-chat:");
+}
+
+function getTeacherChatRole(teacher, student, classRecord, staffRoles) {
+  const teacherRoles = staffRoles
+    .filter((staffRole) =>
+      staffRole.teacher_id === teacher.id ||
+      staffRole.teacher_id === teacher.staff_id ||
+      staffRole.user_id === teacher.staff_id ||
+      staffRole.user_id === teacher.user_id
+    )
+    .map((staffRole) => String(staffRole.role || "").toLowerCase().replace(/_/g, " "));
+  const teacherType = String(teacher.teacher_type || "").toLowerCase().replace(/_/g, " ");
+  const isPrincipal = teacherType === "principal" || teacherRoles.includes("principal");
+  const isHeadTeacher = teacherType.includes("head teacher") ||
+    teacherRoles.includes("head teacher");
+  const isClassTeacher = teacher.assigned_class === student.current_class ||
+    teacher.form_teacher_class === student.current_class ||
+    classRecord?.class_teacher_id === teacher.id ||
+  classRecord?.class_teacher_id === teacher.staff_id ||
+  classRecord?.class_teacher_id === teacher.user_id;
+
+  if (isPrincipal) return "Principal";
+  if (isHeadTeacher && teacher.section === student.section) return "Head Teacher";
+  if (isClassTeacher) return "Class/Form Teacher";
+  return null;
+}
+
+async function getParentChatScope(req) {
+  if (!isParentChatUser(req)) return null;
+  const profileId = req.user?.profile_id || req.user?.id;
+  const parent = profileId
+    ? await prisma.parent.findUnique({ where: { id: profileId } })
+    : req.user?.username
+      ? await prisma.parent.findUnique({ where: { parent_id: req.user.username } })
+      : null;
+  if (!parent) return { parent: null, conversations: [] };
+
+  const childConditions = [
+    ...(parent.phone ? [{ parent_phone: parent.phone }] : []),
+    ...(parent.email ? [{ parent_email: parent.email }] : []),
+    ...(parent.parent_id ? [{ parent_id: parent.parent_id }] : []),
+  ];
+  const linkConditions = [
+    ...(parent.email ? [{ parent_email: parent.email }] : []),
+    ...(parent.parent_id ? [{ parent_id: parent.parent_id }] : []),
+    { parent_user_id: parent.id },
+  ];
+  const normalizedParentPhone = normalizeChatPhone(parent.phone);
+  const [directChildren, phoneChildren, parentLinks] = await Promise.all([
+    childConditions.length
+      ? prisma.student.findMany({ where: { AND: [{ status: "Active" }, { OR: childConditions }] } })
+      : Promise.resolve([]),
+    parent.phone
+      ? prisma.student.findMany({
+          where: {
+            status: "Active",
+            OR: [
+              { parent_phone: parent.phone },
+              ...(normalizedParentPhone.length >= 4
+                ? [{ parent_phone: { contains: normalizedParentPhone.slice(-4) } }]
+                : []),
+            ],
+          },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            current_class: true,
+            section: true,
+            parent_phone: true,
+          },
+        })
+      : Promise.resolve([]),
+    prisma.parentStudent.findMany({ where: { OR: linkConditions } }),
+  ]);
+  const linkedIds = parentLinks.map((link) => link.student_id).filter(Boolean);
+  const linkedChildren = linkedIds.length
+    ? await prisma.student.findMany({ where: { id: { in: linkedIds }, status: "Active" } })
+    : [];
+  const childrenById = new Map(
+    [
+      ...directChildren,
+      ...phoneChildren.filter(
+        (student) =>
+          normalizedParentPhone &&
+          normalizeChatPhone(student.parent_phone) === normalizedParentPhone
+      ),
+      ...linkedChildren,
+    ].map((student) => [student.id, student])
+  );
+  const children = [...childrenById.values()];
+  const classNames = [...new Set(children.map((student) => student.current_class).filter(Boolean))];
+  const [classRecords, teachers, staffRoles] = await Promise.all([
+    classNames.length
+      ? prisma.schoolClass.findMany({ where: { name: { in: classNames } } })
+      : Promise.resolve([]),
+    prisma.teacher.findMany({ where: { status: "Active" } }),
+    prisma.staffRole.findMany({ where: { status: "Active" } }),
+  ]);
+  const classesByName = new Map(classRecords.map((schoolClass) => [schoolClass.name, schoolClass]));
+  const conversations = [];
+
+  children.forEach((student) => {
+    const classRecord = classesByName.get(student.current_class);
+    teachers.forEach((teacher) => {
+      const role = getTeacherChatRole(teacher, student, classRecord, staffRoles);
+      if (!role) return;
+      conversations.push({
+        conversation_id: `parent-chat:${parent.id}:${student.id}:${teacher.id}`,
+        parent_id: parent.id,
+        student_id: student.id,
+        student_name: `${student.first_name} ${student.last_name}`.trim(),
+        student_class: student.current_class,
+        recipient_id: teacher.id,
+        recipient_name: `${teacher.first_name} ${teacher.last_name}`.trim(),
+        recipient_role: role,
+        recipient_section: teacher.section,
+      });
+    });
+  });
+
+  return { parent, children, conversations };
+}
+
+async function getTeacherParentChatScope(req) {
+  if (!isEligibleParentChatStaff(req)) return { teacher: null, conversations: [] };
+  const identity = req.user || {};
+  const teacherConditions = [
+    ...(identity.profile_id ? [{ id: identity.profile_id }] : []),
+    ...(identity.id ? [{ id: identity.id }] : []),
+    ...(identity.staff_id ? [{ staff_id: identity.staff_id }] : []),
+    ...(identity.email ? [{ email: identity.email }] : []),
+  ];
+  const teacher = teacherConditions.length
+    ? await prisma.teacher.findFirst({ where: { OR: teacherConditions } })
+    : null;
+  if (!teacher) return { teacher: null, conversations: [] };
+
+  const existingMessages = await prisma.chatMessage.findMany({
+    where: {
+      conversation_id: { startsWith: "parent-chat:" },
+      OR: [{ sender_id: teacher.id }, { recipient_id: teacher.id }],
+    },
+    select: { conversation_id: true },
+    distinct: ["conversation_id"],
+  });
+  const threadParts = existingMessages
+    .map(({ conversation_id }) => {
+      const [, parentId, studentId, recipientId] = String(conversation_id || "").split(":");
+      return recipientId === teacher.id ? { conversation_id, parentId, studentId } : null;
+    })
+    .filter((thread) => thread?.parentId && thread.studentId);
+  const [parents, students, staffRoles] = await Promise.all([
+    prisma.parent.findMany({
+      where: { id: { in: [...new Set(threadParts.map((thread) => thread.parentId))] } },
+    }),
+    prisma.student.findMany({
+      where: {
+        id: { in: [...new Set(threadParts.map((thread) => thread.studentId))] },
+        status: "Active",
+      },
+    }),
+    prisma.staffRole.findMany({ where: { status: "Active" } }),
+  ]);
+  const classNames = [...new Set(students.map((student) => student.current_class))];
+  const classRecords = classNames.length
+    ? await prisma.schoolClass.findMany({ where: { name: { in: classNames } } })
+    : [];
+  const parentsById = new Map(parents.map((parent) => [parent.id, parent]));
+  const studentsById = new Map(students.map((student) => [student.id, student]));
+  const classesByName = new Map(classRecords.map((classRecord) => [classRecord.name, classRecord]));
+  const conversations = [];
+  for (const thread of threadParts) {
+    const parent = parentsById.get(thread.parentId);
+    const student = studentsById.get(thread.studentId);
+    if (!parent || !student) continue;
+    const classRecord = classesByName.get(student.current_class);
+    const role = getTeacherChatRole(teacher, student, classRecord, staffRoles);
+    if (!role) continue;
+    conversations.push({
+      conversation_id: thread.conversation_id,
+      parent_id: parent.id,
+      parent_name: parent.full_name ||
+        `${parent.first_name || ""} ${parent.last_name || ""}`.trim() ||
+        "Parent",
+      student_id: student.id,
+      student_name: `${student.first_name} ${student.last_name}`.trim(),
+      student_class: student.current_class,
+      recipient_id: teacher.id,
+      recipient_name: `${teacher.first_name} ${teacher.last_name}`.trim(),
+      recipient_role: role,
+    });
+  }
+  return { teacher, conversations };
+}
+
 function isFeePaymentModel(model) {
   return model === "SchoolFeePayment" || model === "FeePayment";
 }
@@ -220,6 +436,21 @@ async function validateAssignmentSubmissionAccess(req, assignment, existingSubmi
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/entities/:model — list all
 // ─────────────────────────────────────────────────────────────────────────────
+router.get("/chat/conversations", authenticate, async (req, res) => {
+  try {
+    const scope = isParentChatUser(req)
+      ? await getParentChatScope(req)
+      : await getTeacherParentChatScope(req);
+    if (!isParentChatUser(req) && (!isEligibleParentChatStaff(req) || !scope.teacher)) {
+      return res.status(403).json({ error: "Parent chat is only available to parents and eligible class staff." });
+    }
+    return res.json(scope.conversations);
+  } catch (err) {
+    console.error("[GET /chat/conversations]", err);
+    return res.status(500).json({ error: "Failed to load class chat conversations." });
+  }
+});
+
 router.get(
   "/:model",
   (req, res, next) => {
@@ -240,8 +471,21 @@ router.get(
     try {
       const orderBy = parseSort(req.query._sort);
       const take = req.query._limit ? parseInt(req.query._limit) : undefined;
-
-      const records = await db.findMany({ orderBy, take });
+      const where = model === "ChatMessage"
+        ? isParentChatUser(req)
+          ? {
+            conversation_id: {
+              in: (await getParentChatScope(req)).conversations.map((item) => item.conversation_id),
+            },
+          }
+          : {
+              OR: [
+                { conversation_id: null },
+                { conversation_id: { not: { startsWith: "parent-chat:" } } },
+              ],
+            }
+        : undefined;
+      const records = await db.findMany({ where, orderBy, take });
       return res.json(toUIEnums(records).filter((record) => sanitizeExamForStudent(record, req, model)));
     } catch (err) {
       console.error(`[GET /${model}]`, err);
@@ -273,6 +517,31 @@ router.get(
     try {
       const rawWhere = buildWhere(req.query);
       const where = toPrismaEnums(rawWhere);
+      if (model === "ChatMessage" && isParentChatUser(req)) {
+        const scope = await getParentChatScope(req);
+        const allowedIds = scope.conversations.map((item) => item.conversation_id);
+        if (where.conversation_id && !allowedIds.includes(where.conversation_id)) {
+          return res.status(403).json({ error: "You cannot access this chat conversation." });
+        }
+        where.conversation_id = { in: allowedIds };
+      } else if (model === "ChatMessage") {
+        if (isParentChatConversationId(where.conversation_id)) {
+          const scope = await getTeacherParentChatScope(req);
+          if (!scope.conversations.some((item) => item.conversation_id === where.conversation_id)) {
+            return res.status(403).json({ error: "You cannot access this parent conversation." });
+          }
+        } else {
+          where.AND = [
+            ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+            {
+              OR: [
+                { conversation_id: null },
+                { conversation_id: { not: { startsWith: "parent-chat:" } } },
+              ],
+            },
+          ];
+        }
+      }
       if (isStudentUser(req) && isFeePaymentModel(model)) {
         const student = await getStudentFeePaymentScope(req);
         if (!student) return res.status(403).json({ error: "Student profile not found." });
@@ -316,6 +585,25 @@ router.get(
     try {
       const record = await db.findUnique({ where: { id: req.params.id } });
       if (!record) return res.status(404).json({ error: "Record not found." });
+      if (
+        model === "ChatMessage" &&
+        isParentChatUser(req) &&
+        !(
+          await getParentChatScope(req)
+        ).conversations.some((item) => item.conversation_id === record.conversation_id)
+      ) {
+        return res.status(404).json({ error: "Record not found." });
+      }
+      if (
+        model === "ChatMessage" &&
+        isParentChatConversationId(record.conversation_id) &&
+        !isParentChatUser(req)
+      ) {
+        const scope = await getTeacherParentChatScope(req);
+        if (!scope.conversations.some((item) => item.conversation_id === record.conversation_id)) {
+          return res.status(404).json({ error: "Record not found." });
+        }
+      }
       if (isStudentUser(req) && isFeePaymentModel(model)) {
         const student = await getStudentFeePaymentScope(req);
         if (!student) return res.status(403).json({ error: "Student profile not found." });
@@ -364,6 +652,53 @@ router.post(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "ChatMessage" && isParentChatUser(req)) {
+        const scope = await getParentChatScope(req);
+        const conversation = scope.conversations.find(
+          (item) => item.conversation_id === rawData.conversation_id
+        );
+        if (!conversation) {
+          return res.status(403).json({ error: "You can only message the class staff assigned to your children." });
+        }
+        rawData.sender_id = scope.parent.id;
+        rawData.sender_name = scope.parent.full_name ||
+          `${scope.parent.first_name || ""} ${scope.parent.last_name || ""}`.trim() ||
+          scope.conversations.find((item) => item.parent_id === scope.parent.id)?.parent_name ||
+          "Parent";
+        rawData.sender_role = "Parent";
+        rawData.recipient_id = conversation.recipient_id;
+        rawData.recipient_name = conversation.recipient_name;
+        rawData.channel = conversation.conversation_id;
+        rawData.conversation_id = conversation.conversation_id;
+        rawData.is_broadcast = false;
+        rawData.target_audience = null;
+        if (!String(rawData.message || rawData.content || "").trim()) {
+          return res.status(400).json({ error: "Message cannot be empty." });
+        }
+      } else if (
+        model === "ChatMessage" &&
+        isParentChatConversationId(rawData.conversation_id)
+      ) {
+        const scope = await getTeacherParentChatScope(req);
+        const conversation = scope.conversations.find(
+          (item) => item.conversation_id === rawData.conversation_id
+        );
+        if (!conversation) {
+          return res.status(403).json({ error: "You cannot message this parent conversation." });
+        }
+        rawData.sender_id = scope.teacher.id;
+        rawData.sender_name = `${scope.teacher.first_name} ${scope.teacher.last_name}`.trim();
+        rawData.sender_role = conversation.recipient_role;
+        rawData.recipient_id = conversation.parent_id;
+        rawData.recipient_name = conversation.parent_name;
+        rawData.channel = conversation.conversation_id;
+        rawData.is_broadcast = false;
+        rawData.target_audience = null;
+        if (!String(rawData.message || rawData.content || "").trim()) {
+          return res.status(400).json({ error: "Message cannot be empty." });
+        }
+      }
 
       if (model === "AdmissionApplication" && req.user) {
         rawData.created_by_id = req.user.id;
@@ -453,6 +788,20 @@ router.patch(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "ChatMessage") {
+        if (isParentChatUser(req)) {
+          return res.status(403).json({ error: "Chat messages cannot be edited." });
+        }
+        const existingMessage = await prisma.chatMessage.findUnique({ where: { id } });
+        if (existingMessage && isParentChatConversationId(existingMessage.conversation_id)) {
+          const scope = await getTeacherParentChatScope(req);
+          if (!scope.conversations.some((item) => item.conversation_id === existingMessage.conversation_id)) {
+            return res.status(404).json({ error: "Record not found." });
+          }
+          return res.status(403).json({ error: "Parent chat messages cannot be edited." });
+        }
+      }
 
       if (model === "Teacher" && req.user?.role === "director") {
         if (Object.keys(rawData).some((field) => field !== "salary")) {

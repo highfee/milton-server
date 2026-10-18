@@ -122,13 +122,17 @@ router.get("/lesson-notes/:id/attachment", authenticate, async (req, res) => {
 
     const asset = getCloudinaryAssetDetails(note.attachment_url);
     if (!asset) return res.json({ file_url: note.attachment_url });
-    if (asset.deliveryType === "upload") {
-      return res.json({ file_url: note.attachment_url });
-    }
 
     const cloudinary = getCloudinary();
     if (!cloudinary) {
+      if (asset.deliveryType === "upload") {
+        return res.json({ file_url: note.attachment_url });
+      }
       return res.status(503).json({ error: "Attachment delivery is temporarily unavailable." });
+    }
+
+    if (asset.deliveryType === "upload" && asset.resourceType === "raw") {
+      return res.json({ file_url: note.attachment_url });
     }
 
     const fileUrl = cloudinary.utils.private_download_url(asset.publicId, asset.format || "", {

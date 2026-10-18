@@ -1,12 +1,15 @@
 import cors from "cors";
 
 const allowedOrigins = [
-  process.env.CLIENT_ORIGIN || "http://localhost:5173",
+  "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
   "http://localhost:8080",
   "https://www.milton-college.com.ng",
-];
+  "https://www.milton-college.com.ng/",
+  process.env.CLIENT_ORIGIN,
+  "http://127.0.0.1:5173",
+].filter(Boolean);
 
 // In production, also allow the deployed domain
 if (process.env.PRODUCTION_ORIGIN) {

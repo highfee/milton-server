@@ -334,6 +334,29 @@ router.post("/exams/:examId/publish", authorize("admin", "teacher"), async (req,
   }
 });
 
+router.get("/exams/:examId/results", authorize("admin", "teacher", "principal", "director"), async (req, res) => {
+  try {
+    const exam = await prisma.cBTExam.findUnique({ where: { id: req.params.examId } });
+    if (!exam) return res.status(404).json({ error: "Exam not found." });
+    const roles = [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])]
+      .map((role) => String(role || "").toLowerCase());
+    if (
+      !roles.some((role) => ["admin", "director", "principal"].includes(role)) &&
+      exam.created_by !== req.user?.email
+    ) {
+      return res.status(403).json({ error: "You can only view results for your own exam." });
+    }
+    const results = await prisma.cBTResult.findMany({
+      where: { exam_id: exam.id },
+      orderBy: [{ class: "asc" }, { student_name: "asc" }],
+    });
+    return res.json(results);
+  } catch (error) {
+    console.error("[GET /cbt/exams/:examId/results]", error);
+    return res.status(500).json({ error: "Unable to load exam results." });
+  }
+});
+
 router.get("/exams/:examId/pins", authorize("admin", "teacher", "principal"), async (req, res) => {
   try {
     const exam = await prisma.cBTExam.findUnique({ where: { id: req.params.examId } });
@@ -343,11 +366,23 @@ router.get("/exams/:examId/pins", authorize("admin", "teacher", "principal"), as
     if (!roles.some((role) => ["admin", "director", "principal"].includes(role)) && exam.created_by !== req.user?.email) {
       return res.status(403).json({ error: "You can only view PINs for your own exam." });
     }
-    const pins = await prisma.cBTExamPassword.findMany({
-      where: { exam_id: exam.id },
-      orderBy: [{ class: "asc" }, { batch_number: "asc" }, { student_name: "asc" }],
-    });
-    return res.json({ pins, active_batches: exam.active_batches || {} });
+    const [pins, results] = await Promise.all([
+      prisma.cBTExamPassword.findMany({
+        where: { exam_id: exam.id },
+        orderBy: [{ class: "asc" }, { batch_number: "asc" }, { student_name: "asc" }],
+      }),
+      prisma.cBTResult.findMany({
+        where: { exam_id: exam.id },
+        select: { student_id: true, submitted_at: true, completed_at: true },
+      }),
+    ]);
+    const resultsByStudent = new Map(results.map((result) => [result.student_id, result]));
+    const roster = pins.map((pin) => ({
+      ...pin,
+      submitted_at: resultsByStudent.get(pin.student_id)?.submitted_at ||
+        resultsByStudent.get(pin.student_id)?.completed_at || null,
+    }));
+    return res.json({ pins: roster, active_batches: exam.active_batches || {} });
   } catch (error) {
     console.error("[GET /cbt/exams/:examId/pins]", error);
     return res.status(500).json({ error: "Unable to load exam PINs." });

@@ -4,7 +4,7 @@ import { Router } from "express";
 import prisma from "../config/prisma.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { toUIEnums, toPrismaEnums } from "../utils/enumMapper.js";
-import { buildResultSnapshot } from "../services/resultSnapshots.js";
+import { buildResultSnapshot, repairResultSnapshot } from "../services/resultSnapshots.js";
 
 const router = Router();
 const TOKEN_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -138,6 +138,13 @@ router.post("/check", async (req, res) => {
       if (String(snapshot.student?.admission_number || "").toLowerCase() !== rawAdm.toLowerCase()) {
         return res.status(400).json({ error: "Invalid result token/PIN for this student, term, and session." });
       }
+      snapshot = await repairResultSnapshot(prisma, tokenRecord, snapshot);
+      if (JSON.stringify(snapshot) !== JSON.stringify(tokenRecord.snapshot)) {
+        await prisma.resultToken.update({
+          where: { id: tokenRecord.id },
+          data: { snapshot },
+        });
+      }
     } else {
       const student = await prisma.student.findFirst({
         where: { admission_number: { equals: rawAdm, mode: "insensitive" } },
@@ -159,6 +166,7 @@ router.post("/check", async (req, res) => {
           error: "No approved results found for this student in the selected term and session.",
         });
       }
+      snapshot = await repairResultSnapshot(prisma, tokenRecord, snapshot);
       await prisma.resultToken.updateMany({
         where: { id: tokenRecord.id, snapshot: Prisma.DbNull },
         data: { snapshot },

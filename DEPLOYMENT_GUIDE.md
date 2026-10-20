@@ -78,11 +78,11 @@ Once your new backend URL is live (e.g. `https://milton-server.koyeb.app/api` or
 
 ## 5. Locking and backfilling result tokens
 
-Result tokens now store an immutable snapshot of the approved result, student details, class ranking, subject statistics, attendance, and school settings. Before deploying this version, apply the Prisma schema and backfill existing tokens:
+Result tokens now store a snapshot of the approved result, student details, class ranking, subject statistics, attendance, and school settings. The backfill command is safe to rerun: it repairs existing snapshots with missing offered subjects and class totals while preserving previously captured scores and populated values. Before deploying this version, apply the Prisma schema and run the backfill:
 
 ```bash
 pnpm db:push
 pnpm db:backfill-result-snapshots
 ```
 
-Run both commands with the production `DATABASE_URL` and `DIRECT_URL` configured. The backfill derives missing totals, grades, remarks, averages, and rankings where the stored approved results provide enough data. It preserves existing stored ranking values where present; missing score components cannot be reconstructed and are not invented. After the backfill, result and report-card records associated with an issued token cannot be created, edited, or deleted through the API. Student roster changes do not alter the saved result slip.
+Run both commands with the production `DATABASE_URL` and `DIRECT_URL` configured. The backfill derives missing totals, grades, remarks, averages, and rankings where the stored approved results provide enough data, and adds blank-score rows for subjects recorded for the class in that term but absent from a student's result. It preserves existing stored scores and ranking values where present; missing score components cannot be reconstructed and are not invented. It fills class size from stored class totals, report cards, current enrollment, or the number of students with term results, whichever is highest. After the backfill, result and report-card records associated with an issued token cannot be created, edited, or deleted through the API. Student roster changes do not alter the saved result slip.

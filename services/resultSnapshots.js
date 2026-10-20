@@ -95,6 +95,24 @@ export async function populateHistoricalResultMetadata(db) {
     }
 
     const classRoster = new Set(resultsForGroup.map((result) => result.student_id));
+    const [activeClassStudents, reportCards] = await Promise.all([
+      db.student.count({
+        where: { current_class: resultsForGroup[0].class, status: "Active" },
+      }),
+      db.reportCard.findMany({
+        where: {
+          class: resultsForGroup[0].class,
+          term: resultsForGroup[0].term,
+          session: resultsForGroup[0].session,
+        },
+        select: { total_students: true },
+      }),
+    ]);
+    const classSize = Math.max(
+      classRoster.size,
+      activeClassStudents,
+      ...reportCards.map((reportCard) => Number(reportCard.total_students) || 0),
+    );
     const classRanking = [...classRoster].map((studentId) => ({ studentId, total: studentTotals.get(studentId) || 0 })).sort((a, b) => b.total - a.total);
     const classRankMap = new Map(classRanking.map((entry, index) => [entry.studentId, index + 1]));
 
@@ -113,7 +131,7 @@ export async function populateHistoricalResultMetadata(db) {
           subject_position: row.subject_position ?? subjectRankMap.get(studentId) ?? null,
           class_average_score: row.class_average_score ?? avg,
           class_position: row.class_position ?? classRankMap.get(studentId) ?? null,
-          total_in_class: row.total_in_class ?? classRoster.size,
+          total_in_class: row.total_in_class ?? classSize,
           total_score_all_subjects: row.total_score_all_subjects ?? studentSubjectTotals.get(studentId) ?? null,
         };
         const updatePayload = Object.fromEntries(Object.entries(nextData).filter(([, value]) => value !== null && value !== undefined));
@@ -175,13 +193,96 @@ export async function buildResultSnapshot(db, {
     where: { ...where, class: resultClass },
     orderBy: { subject_name: "asc" },
   })).map(completeDerivedResultFields);
+  const [roster, classReportCards, allClassResultRows] = await Promise.all([
+    db.student.findMany({
+      where: { current_class: resultClass, status: "Active" },
+      select: { id: true },
+    }),
+    db.reportCard.findMany({
+      where: { term: toPrismaEnums(term), session, class: resultClass },
+      select: { subjects_data: true, total_students: true, position: true },
+    }),
+    db.result.findMany({
+      where: { term: toPrismaEnums(term), session, class: resultClass },
+      select: { subject_id: true, subject_name: true, section: true },
+    }),
+  ]);
   const studentResults = allClassResults
     .filter((result) => result.student_id === student.id)
     .map(completeDerivedResultFields);
-  const roster = await db.student.findMany({
-    where: { current_class: resultClass, status: "Active" },
-    select: { id: true },
-  });
+  const expectedSubjects = new Map();
+  for (const result of allClassResultRows) {
+    expectedSubjects.set(result.subject_id, {
+      subject_id: result.subject_id,
+      subject_name: result.subject_name || "Subject",
+      section: result.section,
+    });
+  }
+  for (const reportCard of classReportCards) {
+    const subjects = Array.isArray(reportCard.subjects_data)
+      ? reportCard.subjects_data
+      : Object.values(reportCard.subjects_data || {});
+    for (const subject of subjects) {
+      const subjectName = String(subject?.subject_name || subject?.name || "").trim();
+      if (!subjectName) continue;
+      const existing = [...expectedSubjects.values()].some(
+        (item) => item.subject_name.toLowerCase() === subjectName.toLowerCase(),
+      );
+      if (!existing) {
+        expectedSubjects.set(`historical:${subjectName.toLowerCase()}`, {
+          subject_id: `historical:${subjectName.toLowerCase()}`,
+          subject_name: subjectName,
+          section: student.section,
+        });
+      }
+    }
+  }
+  if (expectedSubjects.size === 0) {
+    const assignedSubjects = await db.subject.findMany({
+      where: {
+        status: "Active",
+        OR: [
+          { class: resultClass },
+          { classes: { array_contains: [resultClass] } },
+        ],
+      },
+      select: { id: true, name: true, section: true },
+    });
+    for (const subject of assignedSubjects) {
+      expectedSubjects.set(subject.id, {
+        subject_id: subject.id,
+        subject_name: subject.name,
+        section: subject.section || student.section,
+      });
+    }
+  }
+  const resultSubjects = new Set(studentResults.map((result) => result.subject_id));
+  const resultSubjectNames = new Set(studentResults.map((result) => (result.subject_name || "").toLowerCase()));
+  for (const subject of expectedSubjects.values()) {
+    if (resultSubjects.has(subject.subject_id) ||
+      resultSubjectNames.has(subject.subject_name.toLowerCase())) continue;
+    studentResults.push({
+      id: `missing:${student.id}:${subject.subject_id}`,
+      student_id: student.id,
+      student_name: `${student.first_name || ""} ${student.last_name || ""}`.trim(),
+      admission_number: student.admission_number,
+      class: resultClass,
+      section: subject.section || student.section,
+      term: toPrismaEnums(term),
+      session,
+      subject_id: subject.subject_id,
+      subject_name: subject.subject_name,
+      first_ca: null,
+      second_ca: null,
+      third_ca: null,
+      exam_score: null,
+      total: null,
+      grade: null,
+      remark: null,
+      status: "Approved",
+    });
+  }
+  studentResults.sort((a, b) => (a.subject_name || "").localeCompare(b.subject_name || ""));
 
   const totals = new Map();
   const subjectScores = new Map();
@@ -201,14 +302,20 @@ export async function buildResultSnapshot(db, {
     : calculatedClassPosition;
   const totalScore = studentResults.reduce((sum, result) => sum + (result.total || 0), 0);
   const totalSubjects = studentResults.length;
-  const calculatedAverage = totalSubjects ? Number((totalScore / totalSubjects).toFixed(2)) : 0;
+  const scoredSubjects = studentResults.filter((result) => result.total !== null && result.total !== undefined).length;
+  const calculatedAverage = scoredSubjects ? Number((totalScore / scoredSubjects).toFixed(2)) : 0;
   const totalScoreSnapshot = preferStoredSummary
     ? studentResults.find((result) => result.total_score_all_subjects !== null)?.total_score_all_subjects ?? totalScore
     : totalScore;
   const average = totalSubjects ? Number((totalScoreSnapshot / totalSubjects).toFixed(2)) : 0;
-  const totalInClass = preferStoredSummary
-    ? studentResults.find((result) => result.total_in_class !== null)?.total_in_class ?? roster.length
-    : roster.length;
+  const resultCohortSize = new Set(allClassResults.map((result) => result.student_id)).size;
+  const storedClassSize = studentResults.find((result) => result.total_in_class !== null)?.total_in_class
+    ?? classReportCards.reduce((max, reportCard) => Math.max(max, reportCard.total_students || 0), 0);
+  const totalInClass = Math.max(
+    Number(storedClassSize) || 0,
+    roster.length,
+    resultCohortSize,
+  );
   const subjectStats = new Map();
 
   for (const [subjectId, entries] of subjectScores) {
@@ -290,5 +397,57 @@ export async function buildResultSnapshot(db, {
     },
     attendanceSummary,
     settings,
+  };
+}
+
+export async function repairResultSnapshot(db, token, existingSnapshot = token.snapshot) {
+  const fallbackStudent = existingSnapshot?.student || token;
+  const rebuilt = await buildResultSnapshot(db, {
+    studentId: token.student_id || fallbackStudent.id,
+    admissionNumber: token.admission_number || fallbackStudent.admission_number,
+    term: token.term,
+    session: token.session,
+    className: token.class || fallbackStudent.current_class || fallbackStudent.class,
+    fallbackStudent,
+    preferStoredSummary: true,
+  });
+  if (!rebuilt?.results.length) return existingSnapshot;
+
+  const currentResults = Array.isArray(existingSnapshot?.results) ? existingSnapshot.results : [];
+  const existingSubjectIds = new Set(currentResults.map((result) => result.subject_id).filter(Boolean));
+  const existingSubjectNames = new Set(currentResults.map((result) => String(result.subject_name || "").toLowerCase()));
+  const missingResults = rebuilt.results.filter((result) =>
+    !existingSubjectIds.has(result.subject_id) &&
+    !existingSubjectNames.has(String(result.subject_name || "").toLowerCase()),
+  );
+  const results = currentResults.length > 0
+    ? [...currentResults, ...missingResults]
+    : rebuilt.results;
+  results.sort((a, b) => String(a.subject_name || "").localeCompare(String(b.subject_name || "")));
+
+  const storedClassSize = Math.max(
+    Number(existingSnapshot?.rankings?.totalInClass) || 0,
+    ...currentResults.map((result) => Number(result.total_in_class) || 0),
+  );
+  const totalInClass = Math.max(storedClassSize, Number(rebuilt.rankings.totalInClass) || 0);
+  const hydratedResults = results.map((result) => ({
+    ...result,
+    total_in_class: result.total_in_class ?? totalInClass,
+    total_subjects: result.total_subjects ?? results.length,
+  }));
+  return {
+    ...rebuilt,
+    ...(existingSnapshot || {}),
+    student: existingSnapshot?.student || rebuilt.student,
+    results: hydratedResults,
+    rankings: {
+      ...rebuilt.rankings,
+      ...(existingSnapshot?.rankings || {}),
+      totalInClass,
+      totalSubjects: Math.max(
+        Number(existingSnapshot?.rankings?.totalSubjects) || 0,
+        hydratedResults.length,
+      ),
+    },
   };
 }

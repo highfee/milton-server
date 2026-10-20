@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
     "db:seed": "node prisma/seed.js",
     "db:import": "node scripts/import_old_data.js",
+    "db:backfill-result-snapshots": "node scripts/backfill_result_snapshots.js",
     "db:studio": "prisma studio --schema=prisma/schema.prisma"
   },
   "dependencies": {

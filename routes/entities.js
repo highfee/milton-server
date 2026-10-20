@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import prisma from "../config/prisma.js";
 import {
   authenticate,
@@ -69,6 +70,27 @@ function resolveModel(modelName) {
   return factory();
 }
 
+async function hasIssuedResultToken(result, db = prisma) {
+  if (!result?.student_id || !result?.term || !result?.session) return false;
+  return Boolean(await db.resultToken.findFirst({
+    where: {
+      term: result.term,
+      session: result.session,
+      OR: [
+        { student_id: result.student_id },
+        ...(result.admission_number ? [{ admission_number: result.admission_number }] : []),
+      ],
+    },
+    select: { id: true },
+  }));
+}
+
+function lockedResultError() {
+  const error = new Error("This result is locked because a result token has already been generated.");
+  error.code = "RESULT_LOCKED";
+  return error;
+}
+
 function buildAuthChain(modelName, operation) {
   const roles = getRequiredRoles(modelName, operation);
   if (roles === null) {
@@ -110,6 +132,12 @@ function sanitizeExamForStudent(record, req, model) {
   delete safeExam.questions;
   delete safeExam.exam_password;
   return safeExam;
+}
+
+function omitResultTokenSnapshot(record, model) {
+  if (model !== "ResultToken" || !record) return record;
+  const { snapshot: _snapshot, ...safeRecord } = record;
+  return safeRecord;
 }
 
 function isStaffUser(req) {
@@ -704,7 +732,9 @@ router.get(
         });
       }
       const records = await db.findMany({ where, orderBy, take });
-      return res.json(toUIEnums(records).filter((record) => sanitizeExamForStudent(record, req, model)));
+      return res.json(toUIEnums(records)
+        .map((record) => omitResultTokenSnapshot(record, model))
+        .filter((record) => sanitizeExamForStudent(record, req, model)));
     } catch (err) {
       console.error(`[GET /${model}]`, err);
       return res.status(500).json({ error: err.message });
@@ -848,7 +878,11 @@ router.get(
               record.student_id === student.admission_number));
         if (!ownsPayment) return res.status(404).json({ error: "Record not found." });
       }
-      const visibleRecord = sanitizeExamForStudent(toUIEnums(record), req, model);
+      const visibleRecord = sanitizeExamForStudent(
+        omitResultTokenSnapshot(toUIEnums(record), model),
+        req,
+        model,
+      );
       if (!visibleRecord) return res.status(404).json({ error: "Record not found." });
       return res.json(visibleRecord);
     } catch (err) {
@@ -887,6 +921,13 @@ router.post(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "ResultToken") {
+        return res.status(400).json({ error: "Generate result tokens through the result-token generation endpoint." });
+      }
+      if (["Result", "ReportCard"].includes(model) && await hasIssuedResultToken(toPrismaEnums(rawData))) {
+        return res.status(409).json({ error: "This result is locked because a result token has already been generated." });
+      }
 
       if (model === "Message" && String(rawData.message_type || "").startsWith("Broadcast:")) {
         const roles = [
@@ -1034,9 +1075,18 @@ router.post(
       }
 
       const prismaData = sanitizeAndCoerce(model, rawData);
-      const record = await db.create({ data: prismaData });
-      return res.status(201).json(toUIEnums(record));
+      const record = ["Result", "ReportCard"].includes(model)
+        ? await prisma.$transaction(async (tx) => {
+          if (await hasIssuedResultToken(prismaData, tx)) throw lockedResultError();
+          return (model === "Result" ? tx.result : tx.reportCard).create({ data: prismaData });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        : await db.create({ data: prismaData });
+      return res.status(201).json(omitResultTokenSnapshot(toUIEnums(record), model));
     } catch (err) {
+      if (err.code === "RESULT_LOCKED") return res.status(409).json({ error: err.message });
+      if (err.code === "P2034") {
+        return res.status(409).json({ error: "A result token was generated concurrently. Refresh and try again." });
+      }
       console.error(`[POST /${model}]`, err);
       return res.status(400).json({ error: err.message });
     }
@@ -1072,6 +1122,18 @@ router.patch(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "ResultToken" && Object.keys(rawData).some((field) => !["status", "is_used"].includes(field))) {
+        return res.status(409).json({ error: "Issued result-token details and snapshots cannot be changed." });
+      }
+      if (["Result", "ReportCard"].includes(model)) {
+        const existingResult = model === "Result"
+          ? await prisma.result.findUnique({ where: { id } })
+          : await prisma.reportCard.findUnique({ where: { id } });
+        if (existingResult && await hasIssuedResultToken(existingResult)) {
+          return res.status(409).json({ error: "This result is locked because a result token has already been generated." });
+        }
+      }
 
       if (model === "ChatMessage") {
         if (isParentChatUser(req)) {
@@ -1242,9 +1304,20 @@ router.patch(
         }
       }
 
-      const record = await db.update({ where: { id }, data: prismaData });
-      return res.json(toUIEnums(record));
+      const record = ["Result", "ReportCard"].includes(model)
+        ? await prisma.$transaction(async (tx) => {
+          const resultDb = model === "Result" ? tx.result : tx.reportCard;
+          const existingResult = await resultDb.findUnique({ where: { id } });
+          if (existingResult && await hasIssuedResultToken(existingResult, tx)) throw lockedResultError();
+          return resultDb.update({ where: { id }, data: prismaData });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+        : await db.update({ where: { id }, data: prismaData });
+      return res.json(omitResultTokenSnapshot(toUIEnums(record), model));
     } catch (err) {
+      if (err.code === "RESULT_LOCKED") return res.status(409).json({ error: err.message });
+      if (err.code === "P2034") {
+        return res.status(409).json({ error: "A result token was generated concurrently. Refresh and try again." });
+      }
       if (err.code === "P2025") {
         return res.status(404).json({ error: "Record not found." });
       }
@@ -1275,9 +1348,33 @@ router.delete(
     if (!db) return res.status(404).json({ error: `Unknown entity: ${model}` });
 
     try {
-      await db.delete({ where: { id } });
+      if (model === "ResultToken") {
+        return res.status(409).json({ error: "Issued result tokens cannot be deleted." });
+      }
+      if (["Result", "ReportCard"].includes(model)) {
+        const existingResult = model === "Result"
+          ? await prisma.result.findUnique({ where: { id } })
+          : await prisma.reportCard.findUnique({ where: { id } });
+        if (existingResult && await hasIssuedResultToken(existingResult)) {
+          return res.status(409).json({ error: "This result is locked because a result token has already been generated." });
+        }
+      }
+      if (["Result", "ReportCard"].includes(model)) {
+        await prisma.$transaction(async (tx) => {
+          const resultDb = model === "Result" ? tx.result : tx.reportCard;
+          const existingResult = await resultDb.findUnique({ where: { id } });
+          if (existingResult && await hasIssuedResultToken(existingResult, tx)) throw lockedResultError();
+          await resultDb.delete({ where: { id } });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } else {
+        await db.delete({ where: { id } });
+      }
       return res.json({ success: true, id });
     } catch (err) {
+      if (err.code === "RESULT_LOCKED") return res.status(409).json({ error: err.message });
+      if (err.code === "P2034") {
+        return res.status(409).json({ error: "A result token was generated concurrently. Refresh and try again." });
+      }
       if (err.code === "P2025") {
         return res.status(404).json({ error: "Record not found." });
       }

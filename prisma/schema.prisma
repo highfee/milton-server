@@ -672,6 +672,7 @@ model ResultToken {
   status           ResultTokenStatus @default(Active)
   approved_by      String?
   approved_date    String?
+  snapshot         Json?
   // Legacy field
   is_used          Boolean           @default(false)
   created_date     DateTime          @default(now()) @map("created_date")

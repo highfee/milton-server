@@ -75,3 +75,14 @@ Once your new backend URL is live (e.g. `https://milton-server.koyeb.app/api` or
    VITE_API_URL=https://<your-new-backend-domain>/api
    ```
 3. Commit and push the frontend repository.
+
+## 5. Locking and backfilling result tokens
+
+Result tokens now store an immutable snapshot of the approved result, student details, class ranking, subject statistics, attendance, and school settings. Before deploying this version, apply the Prisma schema and backfill existing tokens:
+
+```bash
+pnpm db:push
+pnpm db:backfill-result-snapshots
+```
+
+Run both commands with the production `DATABASE_URL` and `DIRECT_URL` configured. The backfill derives missing totals, grades, remarks, averages, and rankings where the stored approved results provide enough data. It preserves existing stored ranking values where present; missing score components cannot be reconstructed and are not invented. After the backfill, result and report-card records associated with an issued token cannot be created, edited, or deleted through the API. Student roster changes do not alter the saved result slip.

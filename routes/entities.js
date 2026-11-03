@@ -145,6 +145,50 @@ function isStaffUser(req) {
     .some((role) => ["admin", "teacher", "head_teacher", "principal", "director"].includes(String(role || "").toLowerCase()));
 }
 
+async function getAttendanceTeacherScope(req) {
+  const roles = [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])]
+    .map((role) => String(role || "").toLowerCase().replace(/_/g, " "));
+  if (roles.some((role) => ["admin", "principal", "head teacher"].includes(role))) {
+    return null;
+  }
+
+  const isTeacher = String(req.user?.profile_type || "").toLowerCase() === "teacher" ||
+    roles.includes("teacher");
+  if (!isTeacher) return null;
+
+  const teacherConditions = [
+    ...(req.user?.profile_id ? [{ id: req.user.profile_id }] : []),
+    ...(req.user?.teacher_id ? [{ id: req.user.teacher_id }] : []),
+    ...(req.user?.id ? [{ id: req.user.id }] : []),
+    ...(req.user?.staff_id ? [{ staff_id: req.user.staff_id }] : []),
+    ...(req.user?.username ? [{ staff_id: req.user.username }] : []),
+    ...(req.user?.email ? [{ email: req.user.email.toLowerCase() }] : []),
+  ];
+  const teacher = teacherConditions.length
+    ? await prisma.teacher.findFirst({ where: { OR: teacherConditions } })
+    : null;
+
+  if (!teacher) return { className: null };
+
+  const teacherType = String(teacher.teacher_type || "").toLowerCase().replace(/_/g, " ");
+  if (teacherType.includes("principal") || teacherType.includes("head teacher")) {
+    return null;
+  }
+  if (
+    !teacherType.includes("class teacher") &&
+    !teacherType.includes("form teacher") &&
+    !teacher.assigned_class &&
+    !teacher.form_teacher_class
+  ) {
+    return null;
+  }
+
+  const className = teacherType.includes("form teacher")
+    ? teacher.form_teacher_class || teacher.assigned_class
+    : teacher.assigned_class || teacher.form_teacher_class;
+  return { className: className || null };
+}
+
 function isStudentUser(req) {
   return [req.user?.role, ...(Array.isArray(req.user?.roles) ? req.user.roles : [])]
     .some((role) => String(role || "").toLowerCase() === "student");
@@ -539,6 +583,25 @@ function isFeePaymentModel(model) {
   return model === "SchoolFeePayment" || model === "FeePayment";
 }
 
+function missingFeePaymentLinkConditions(field) {
+  return [
+    { [field]: null },
+    { [field]: "" },
+    ...["N/A", "null", "undefined"].map((value) => ({
+      [field]: { equals: value, mode: "insensitive" },
+    })),
+  ];
+}
+
+function feePaymentAdmissionNumberCondition(field, admissionNumber) {
+  return {
+    [field]: {
+      equals: admissionNumber.trim(),
+      mode: "insensitive",
+    },
+  };
+}
+
 async function getStudentFeePaymentScope(req) {
   const admissionNumber = req.user?.admission_number || req.user?.username;
   if (admissionNumber) {
@@ -556,10 +619,11 @@ async function getStudentFeePaymentScope(req) {
 
 async function getStudentFeePaymentLinks(student) {
   const links = [{ student_id: student.id }];
-  if (student.admission_number) {
+  const admissionNumber = student.admission_number?.trim();
+  if (admissionNumber) {
     links.push(
-      { admission_number: student.admission_number },
-      { student_id: student.admission_number },
+      feePaymentAdmissionNumberCondition("admission_number", admissionNumber),
+      feePaymentAdmissionNumberCondition("student_id", admissionNumber),
     );
   }
 
@@ -583,20 +647,8 @@ async function getStudentFeePaymentLinks(student) {
       links.push({
         student_name: { in: [...new Set(nameVariants)], mode: "insensitive" },
         AND: [
-          {
-            OR: [
-              { student_id: null },
-              { student_id: "" },
-              { student_id: { equals: "N/A", mode: "insensitive" } },
-            ],
-          },
-          {
-            OR: [
-              { admission_number: null },
-              { admission_number: "" },
-              { admission_number: { equals: "N/A", mode: "insensitive" } },
-            ],
-          },
+          { OR: missingFeePaymentLinkConditions("student_id") },
+          { OR: missingFeePaymentLinkConditions("admission_number") },
         ],
       });
     }
@@ -704,7 +756,7 @@ router.get(
     try {
       const orderBy = parseSort(req.query._sort);
       const take = req.query._limit ? parseInt(req.query._limit) : undefined;
-      const where = model === "ChatMessage"
+      let where = model === "ChatMessage"
         ? isParentChatUser(req)
           ? {
             conversation_id: {
@@ -723,6 +775,14 @@ router.get(
               ],
             }
         : undefined;
+      if (model === "Attendance") {
+        const attendanceScope = await getAttendanceTeacherScope(req);
+        if (attendanceScope) {
+          where = attendanceScope.className
+            ? { class: attendanceScope.className }
+            : { id: { in: [] } };
+        }
+      }
       if (model === "ChatMessage" && !isParentChatUser(req) && isStaffChatUser(req)) {
         const scope = await getStaffChatScope(req);
         where.OR.push({
@@ -765,6 +825,16 @@ router.get(
     try {
       const rawWhere = buildWhere(req.query);
       const where = toPrismaEnums(rawWhere);
+      if (
+        isFeePaymentModel(model) &&
+        typeof where.admission_number === "string" &&
+        where.admission_number.trim()
+      ) {
+        where.admission_number = feePaymentAdmissionNumberCondition(
+          "admission_number",
+          where.admission_number,
+        ).admission_number;
+      }
       if (model === "ChatMessage" && isParentChatUser(req)) {
         const scope = await getParentChatScope(req);
         const allowedIds = scope.conversations.map((item) => item.conversation_id);
@@ -809,6 +879,18 @@ router.get(
         delete where.student_id;
         where.OR = await getStudentFeePaymentLinks(student);
       }
+      if (model === "Attendance") {
+        const attendanceScope = await getAttendanceTeacherScope(req);
+        if (attendanceScope) {
+          const classFilter = attendanceScope.className
+            ? { class: attendanceScope.className }
+            : { id: { in: [] } };
+          where.AND = [
+            ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+            classFilter,
+          ];
+        }
+      }
       const orderBy = parseSort(req.query._sort);
       const take = req.query._limit ? parseInt(req.query._limit) : undefined;
 
@@ -844,6 +926,12 @@ router.get(
     try {
       const record = await db.findUnique({ where: { id: req.params.id } });
       if (!record) return res.status(404).json({ error: "Record not found." });
+      if (model === "Attendance") {
+        const attendanceScope = await getAttendanceTeacherScope(req);
+        if (attendanceScope && record.class !== attendanceScope.className) {
+          return res.status(404).json({ error: "Record not found." });
+        }
+      }
       if (
         model === "ChatMessage" &&
         isParentChatUser(req) &&
@@ -872,10 +960,11 @@ router.get(
       if (isStudentUser(req) && isFeePaymentModel(model)) {
         const student = await getStudentFeePaymentScope(req);
         if (!student) return res.status(403).json({ error: "Student profile not found." });
+        const admissionNumber = student.admission_number?.trim().toLowerCase();
         const ownsPayment = record.student_id === student.id ||
-          (student.admission_number &&
-            (record.admission_number === student.admission_number ||
-              record.student_id === student.admission_number));
+          (admissionNumber &&
+            [record.admission_number, record.student_id]
+              .some((value) => value?.trim().toLowerCase() === admissionNumber));
         if (!ownsPayment) return res.status(404).json({ error: "Record not found." });
       }
       const visibleRecord = sanitizeExamForStudent(
@@ -921,6 +1010,24 @@ router.post(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "Attendance") {
+        const attendanceScope = await getAttendanceTeacherScope(req);
+        if (
+          attendanceScope &&
+          (!attendanceScope.className || rawData.class !== attendanceScope.className)
+        ) {
+          return res.status(403).json({ error: "You can only mark attendance for your assigned class." });
+        }
+        if (attendanceScope) {
+          const student = rawData.student_id
+            ? await prisma.student.findUnique({ where: { id: rawData.student_id } })
+            : null;
+          if (!student || student.current_class !== attendanceScope.className) {
+            return res.status(403).json({ error: "The student must belong to your assigned class." });
+          }
+        }
+      }
 
       if (model === "ResultToken") {
         return res.status(400).json({ error: "Generate result tokens through the result-token generation endpoint." });
@@ -1122,6 +1229,28 @@ router.patch(
         updated_date,
         ...rawData
       } = req.body;
+
+      if (model === "Attendance") {
+        const attendanceScope = await getAttendanceTeacherScope(req);
+        if (attendanceScope) {
+          const existingAttendance = await prisma.attendance.findUnique({ where: { id } });
+          if (!existingAttendance) {
+            return res.status(404).json({ error: "Record not found." });
+          }
+          if (
+            !attendanceScope.className ||
+            existingAttendance.class !== attendanceScope.className ||
+            (rawData.class !== undefined && rawData.class !== attendanceScope.className)
+          ) {
+            return res.status(403).json({ error: "You can only update attendance for your assigned class." });
+          }
+          const studentId = rawData.student_id || existingAttendance.student_id;
+          const student = await prisma.student.findUnique({ where: { id: studentId } });
+          if (!student || student.current_class !== attendanceScope.className) {
+            return res.status(403).json({ error: "The student must belong to your assigned class." });
+          }
+        }
+      }
 
       if (model === "ResultToken" && Object.keys(rawData).some((field) => !["status", "is_used"].includes(field))) {
         return res.status(409).json({ error: "Issued result-token details and snapshots cannot be changed." });

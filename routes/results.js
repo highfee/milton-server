@@ -167,8 +167,8 @@ router.post("/check", async (req, res) => {
         });
       }
       snapshot = await repairResultSnapshot(prisma, tokenRecord, snapshot);
-      await prisma.resultToken.updateMany({
-        where: { id: tokenRecord.id, snapshot: Prisma.DbNull },
+      await prisma.resultToken.update({
+        where: { id: tokenRecord.id },
         data: { snapshot },
       });
     }

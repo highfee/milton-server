@@ -4,7 +4,7 @@ dotenv.config();
 
 const globalForPrisma = globalThis;
 
-const dbUrl = process.env.DIRECT_URL || process.env.DATABASE_URL;
+const dbUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
 
 const prisma = globalForPrisma.prisma ?? new PrismaClient({
   datasources: dbUrl ? { db: { url: dbUrl } } : undefined,

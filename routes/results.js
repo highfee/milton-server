@@ -71,7 +71,7 @@ router.post("/tokens/generate", authenticate, authorize("admin", "accountant"), 
             student_id: student.id,
             student_name: `${student.first_name || ""} ${student.last_name || ""}`.trim(),
             admission_number: student.admission_number,
-            class: student.current_class,
+            class: snapshot.student?.current_class || student.current_class,
             section: student.section,
             term: toPrismaEnums(term),
             session,
@@ -142,7 +142,10 @@ router.post("/check", async (req, res) => {
       if (JSON.stringify(snapshot) !== JSON.stringify(tokenRecord.snapshot)) {
         await prisma.resultToken.update({
           where: { id: tokenRecord.id },
-          data: { snapshot },
+          data: {
+            snapshot,
+            class: snapshot.student?.current_class || tokenRecord.class,
+          },
         });
       }
     } else {
@@ -169,7 +172,10 @@ router.post("/check", async (req, res) => {
       snapshot = await repairResultSnapshot(prisma, tokenRecord, snapshot);
       await prisma.resultToken.update({
         where: { id: tokenRecord.id },
-        data: { snapshot },
+        data: {
+          snapshot,
+          class: snapshot.student?.current_class || tokenRecord.class,
+        },
       });
     }
 

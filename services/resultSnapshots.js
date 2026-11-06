@@ -189,8 +189,9 @@ export async function buildResultSnapshot(db, {
   fallbackStudent,
   preferStoredSummary = false,
 }) {
+  const termEnum = toPrismaEnums(term);
   const where = {
-    term: toPrismaEnums(term),
+    term: termEnum,
     session,
     status: "Approved",
   };
@@ -209,7 +210,24 @@ export async function buildResultSnapshot(db, {
   } : null);
   if (!student) return null;
 
-  const resultClass = className || student.current_class;
+  // Determine the student's true historical class for this term and session.
+  // When students are promoted, student.current_class or token.class may reflect their new class,
+  // whereas their actual exam results for past terms are stored under their previous class.
+  const existingHistoricalResult = await db.result.findFirst({
+    where: {
+      OR: [
+        { student_id: student.id },
+        ...(student.admission_number
+          ? [{ admission_number: { equals: student.admission_number, mode: "insensitive" } }]
+          : []),
+      ],
+      term: termEnum,
+      session,
+    },
+    select: { class: true },
+  });
+
+  const resultClass = existingHistoricalResult?.class || className || student.current_class;
   const allClassResults = (await db.result.findMany({
     where: { ...where, class: resultClass },
     orderBy: { subject_name: "asc" },
@@ -220,17 +238,41 @@ export async function buildResultSnapshot(db, {
       select: { id: true },
     }),
     db.reportCard.findMany({
-      where: { term: toPrismaEnums(term), session, class: resultClass },
+      where: { term: termEnum, session, class: resultClass },
       select: { subjects_data: true, total_students: true, position: true },
     }),
     db.result.findMany({
-      where: { term: toPrismaEnums(term), session, class: resultClass },
+      where: { term: termEnum, session, class: resultClass },
       select: { subject_id: true, subject_name: true, section: true },
     }),
   ]);
   const studentResults = allClassResults
-    .filter((result) => result.student_id === student.id)
+    .filter((result) =>
+      result.student_id === student.id ||
+      (student.admission_number && result.admission_number &&
+        result.admission_number.trim().toLowerCase() === student.admission_number.trim().toLowerCase())
+    )
     .map(completeDerivedResultFields);
+
+  // Extract shared student-level metadata from the student's real recorded results
+  const primaryResult = studentResults.find(
+    (r) => r.affective_traits || r.psychomotor_skills || r.teacher_comment || r.principal_comment || r.promotion_status
+  ) || studentResults[0] || {};
+
+  const sharedMetadata = {
+    affective_traits: primaryResult.affective_traits || null,
+    psychomotor_skills: primaryResult.psychomotor_skills || null,
+    teacher_comment: primaryResult.teacher_comment || null,
+    form_teacher_comment: primaryResult.form_teacher_comment || null,
+    principal_comment: primaryResult.principal_comment || null,
+    head_teacher_comment: primaryResult.head_teacher_comment || null,
+    promotion_status: primaryResult.promotion_status || null,
+    promoted_to_class: primaryResult.promoted_to_class || null,
+    school_fees_arrears: primaryResult.school_fees_arrears ?? null,
+    school_fees_current: primaryResult.school_fees_current ?? null,
+    next_term_begins: primaryResult.next_term_begins || null,
+  };
+
   const expectedSubjects = new Map();
   for (const result of allClassResultRows) {
     expectedSubjects.set(result.subject_id, {
@@ -289,7 +331,7 @@ export async function buildResultSnapshot(db, {
       admission_number: student.admission_number,
       class: resultClass,
       section: subject.section || student.section,
-      term: toPrismaEnums(term),
+      term: termEnum,
       session,
       subject_id: subject.subject_id,
       subject_name: subject.subject_name,
@@ -301,6 +343,7 @@ export async function buildResultSnapshot(db, {
       grade: null,
       remark: null,
       status: "Approved",
+      ...sharedMetadata,
     });
   }
   studentResults.sort((a, b) => (a.subject_name || "").localeCompare(b.subject_name || ""));
@@ -354,7 +397,19 @@ export async function buildResultSnapshot(db, {
   const results = studentResults.map((result) => {
     const stats = subjectStats.get(result.subject_id);
     return {
+      ...sharedMetadata,
       ...result,
+      affective_traits: result.affective_traits || sharedMetadata.affective_traits,
+      psychomotor_skills: result.psychomotor_skills || sharedMetadata.psychomotor_skills,
+      teacher_comment: result.teacher_comment || sharedMetadata.teacher_comment,
+      form_teacher_comment: result.form_teacher_comment || sharedMetadata.form_teacher_comment,
+      principal_comment: result.principal_comment || sharedMetadata.principal_comment,
+      head_teacher_comment: result.head_teacher_comment || sharedMetadata.head_teacher_comment,
+      promotion_status: result.promotion_status || sharedMetadata.promotion_status,
+      promoted_to_class: result.promoted_to_class || sharedMetadata.promoted_to_class,
+      school_fees_arrears: result.school_fees_arrears ?? sharedMetadata.school_fees_arrears,
+      school_fees_current: result.school_fees_current ?? sharedMetadata.school_fees_current,
+      next_term_begins: result.next_term_begins || sharedMetadata.next_term_begins,
       subject_position: stats?.position ?? result.subject_position ?? null,
       class_average_score: stats?.averageScore ?? result.class_average_score ?? null,
       class_position: classPosition ?? result.class_position ?? null,
@@ -365,7 +420,7 @@ export async function buildResultSnapshot(db, {
     };
   });
 
-  const termValue = toPrismaEnums(term);
+  const termValue = termEnum;
   const [attendanceRecords, teacher, settings] = await Promise.all([
     db.attendance.findMany({
       where: {
@@ -415,7 +470,10 @@ export async function buildResultSnapshot(db, {
   };
 
   return {
-    student,
+    student: {
+      ...student,
+      current_class: resultClass,
+    },
     results,
     classTeacher: teacher
       ? {
@@ -430,7 +488,7 @@ export async function buildResultSnapshot(db, {
       totalScore: totalScoreSnapshot,
       totalSubjects,
       average,
-      promoted: results[0]?.promotion_status === "Promoted",
+      promoted: (sharedMetadata.promotion_status || results[0]?.promotion_status) === "Promoted",
     },
     attendanceSummary,
     settings,
@@ -448,9 +506,24 @@ export async function repairResultSnapshot(db, token, existingSnapshot = token.s
     fallbackStudent,
     preferStoredSummary: true,
   });
-  if (!rebuilt?.results.length) return existingSnapshot;
+  if (!rebuilt?.results?.length) return existingSnapshot;
 
   const currentResults = Array.isArray(existingSnapshot?.results) ? existingSnapshot.results : [];
+  const existingClass = currentResults[0]?.class || existingSnapshot?.student?.current_class;
+  const rebuiltClass = rebuilt.results[0]?.class || rebuilt.student?.current_class;
+  const classMismatch = existingClass && rebuiltClass && existingClass !== rebuiltClass;
+
+  const existingHasNoScores = currentResults.every((r) => r.total === null || r.total === undefined || String(r.id || "").startsWith("missing:"));
+  const rebuiltHasScores = rebuilt.results.some((r) => r.total !== null && r.total !== undefined && !String(r.id || "").startsWith("missing:"));
+  const existingLacksTraits = !currentResults[0]?.affective_traits && !currentResults[0]?.psychomotor_skills;
+  const rebuiltHasTraits = Boolean(rebuilt.results[0]?.affective_traits || rebuilt.results[0]?.psychomotor_skills);
+
+  // If existing snapshot was built with wrong class, or has only missing/null scores when real scores exist,
+  // or lacks traits/psychomotor skills that rebuilt now has, replace it entirely with rebuilt.
+  if (classMismatch || (existingHasNoScores && rebuiltHasScores) || (existingLacksTraits && rebuiltHasTraits)) {
+    return rebuilt;
+  }
+
   const existingSubjectIds = new Set(currentResults.map((result) => result.subject_id).filter(Boolean));
   const existingSubjectNames = new Set(currentResults.map((result) => String(result.subject_name || "").toLowerCase()));
   const missingResults = rebuilt.results.filter((result) =>
